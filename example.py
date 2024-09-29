@@ -75,4 +75,4 @@ off2.successor(reset)
 prog.add_baustein(start)
 prog.add_baustein(FTI.NotAus(3))
 prog.add_baustein(eingang2)
-compile_and_send_program(prog, '/dev/ttyUSB2')
+compile_and_send_program(prog, '/dev/ttyUSB0') ## COM-Interface; unter Windows muss hier COM1, COM2, COM3 oder COM4 anstelle von /dev/ttyUSB2 gesetzt werden; unter Linux muss hier ggf. die Interface-Nummer angepasst werden
