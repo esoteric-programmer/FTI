@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import IntEnum
 
-# not working yet: Warte
 # not implemented yet: Terminal, Ton, Unterprogramm
 # not implemented: Meldung, Display, Ende (Ende: implizit!)
 # not tested yet: Variable, Position, Vergleich, ... mit einer anderen Eingabe als einer Konstanten

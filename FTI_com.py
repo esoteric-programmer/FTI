@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 import serial
 import threading
 import sys
@@ -23,6 +21,11 @@ def init(ser2):
   result = read(1, ser2)
   if result[0] != 0xe0:
     return # error!!
+
+def reset(ser2): # motors off
+  send(0xc2,ser2)
+  send(0x00,ser2)
+  send(0x00,ser2)
 
 def read_data_end(odd, ser2):
     send(0x10, ser2)
@@ -121,7 +124,8 @@ def send_data(data, ser2):
 def print_version(ser2):
   send_data(b'\x00', ser2) ## read version
   data = read_data(ser2)
-  print('version: '+str(data[1]))
+  if data[0] == 0x05:
+    print('Got some additional unknown information: '+str(data[1]))
 
 def get_ROM(ser2):
   send_data(b'\x02', ser2) ## read ROM
@@ -152,10 +156,14 @@ def compile_and_send_program(prog: Program, port: str):
   # init active mode
   init(ser2)
 
-  print('Receiving Version Information...')
-  print_version(ser2)
+  print('Setting All Outputs to Zero...')
+  # set outputs to zero  
+  reset(ser2)
+
   print('Receiving ATT File...')
   rom = get_ROM(ser2)
+  print('Done.')
+  print_version(ser2)
 
   print('Compiling Q file...')
   #with open('TMP.ATT', 'wb') as f:

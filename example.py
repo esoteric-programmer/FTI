@@ -1,6 +1,3 @@
-import FTI
-from FTI_com import compile_and_send_program
-
 prog = FTI.Program()
 
 
@@ -44,7 +41,7 @@ lampe = FTI.Lampe(2,True)
 motor = FTI.Motor(3,FTI.Richtung.LINKS)
 off2 = FTI.Lampe(2,False)
 off3 = FTI.Lampe(3,False)
-##warte = FTI.Warte(500) ### das ist noch aus irgendwelchen gründen buggy und funktioniert nicht...
+##warte = FTI.Warte(500) ### Zeitangabe in Millisekunden
 
 
 start.successor(reset)
@@ -68,8 +65,8 @@ off2.successor(reset)
 #lampe.successor(off3)
 #off3.successor(eingang)
 #motor.successor(off2)
-#off2.successor(eingang)
-##warte.successor(eingang)
+#off2.successor(warte)
+#warte.successor(eingang)
 
 
 prog.add_baustein(start)

@@ -164,7 +164,7 @@ def compile_q_file(q_file, att_file):
         result.extend(struct.pack('>HH',offset,0)) ## 2 bytes chunk offset, 2 bytes padding
         for line in q_file.splitlines():
         #for line in file:
-            # Entferne alles nach einem Kommentarzeichen ';' oder '#'
+            # Entferne alles nach einem Kommentarzeichen ';'
             line = line.split(';')[0].strip()
             
             if '&' in line:
@@ -202,7 +202,7 @@ def compile_q_file(q_file, att_file):
                 except Exception as e:
                   print(str(e))
             if '#' in line:
-              match = re.search(r'([A-Za-z]+)*([0-9]+)(\.[0-9]+)?[ \t]*=[ \t](-?[0-9]*\.?[0-9]+)', line.split('#', 1)[1].strip())
+              match = re.search(r'([A-Za-z]+)([0-9]+)(\.[0-9]+)?[ \t]*=[ \t]*(-?[0-9]*\.?[0-9]+)', line.split('#', 1)[1].strip())
               if match:
                 equ = match.groups()
                 try:
@@ -239,7 +239,7 @@ def compile_q_file(q_file, att_file):
                   print('Equation: '+str(equ))
                   print(str(e))
               else:
-                match = re.search(r'([A-Za-z]+)*([0-9]+)(\.[0-9]+)?[ \t]*=[ \t]*"([^"]*)"', line.split('#', 1)[1].strip())
+                match = re.search(r'([A-Za-z]+)([0-9]+)(\.[0-9]+)?[ \t]*=[ \t]*"([^"]*)"', line.split('#', 1)[1].strip())
                 if match:
                   equ = match.groups()
                   try:
