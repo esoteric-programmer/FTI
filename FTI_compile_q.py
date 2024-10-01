@@ -120,13 +120,14 @@ def read_offsets(file):
 
 
 def compile_q_file(q_file, att_file):
+    print('Parsing ATT File...')
     commands = {}
     symbols = {}
     offsets = {}
     datawidth = 2
     with io.BytesIO(att_file) as file:
       info = read_fileinfo(file)
-      print('ATT-File:  '+info[0])
+      print('ATT File: '+info[0])
       print('Processor: '+info[1])
       offsets = read_offsets(file)
       if offsets[0] != 5: ## TODO: what is this value for?
@@ -141,9 +142,9 @@ def compile_q_file(q_file, att_file):
         raise ValueError("Fehler: Unerwartetes Ende der Datei beim Lesen der Bezeichnerliste")
       datawidth = datawidth[0]
       if datawidth == 2:
-        print('interface is 16bit')
+        print('Interface is 16bit.')
       elif datawidth == 4:
-        print('interface is 32bit')
+        print('Interface is 32bit.')
       else:
         raise ValueError('error: interface reported unknown width of datawords - should be 2 or 4 bytes, but is '+str(datawidth)+' bytes')
       
@@ -158,6 +159,7 @@ def compile_q_file(q_file, att_file):
     final_result = []
     #with open(q_file, 'r', encoding='iso-8859-15') as file:
     if True:
+        print('Compiling Q File Against ATT File...')
         result = bytearray()
         offset = offsets[2] ## from ATT file
         fix_offset_at = -1

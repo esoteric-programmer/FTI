@@ -125,7 +125,7 @@ def print_version(ser2):
   send_data(b'\x00', ser2) ## read version
   data = read_data(ser2)
   if data[0] == 0x05:
-    print('Got some additional unknown information: '+str(data[1]))
+    print('Got Some Additional Unknown Information: '+str(data[1]))
 
 def get_ROM(ser2):
   send_data(b'\x02', ser2) ## read ROM
@@ -156,27 +156,26 @@ def compile_and_send_program(prog: Program, port: str):
   # init active mode
   init(ser2)
 
-  print('Setting All Outputs to Zero...')
+  print('Turning All Ports Off...')
   # set outputs to zero  
   reset(ser2)
 
   print('Receiving ATT File...')
   rom = get_ROM(ser2)
-  print('Done.')
   print_version(ser2)
 
-  print('Compiling Q file...')
+  #print('Generating Code...')
   #with open('TMP.ATT', 'wb') as f:
   #    f.write(rom)
 
   prog = compile_q_file(prog.build_q_file(), rom) #'TMP.ATT')
 
-  print('Sending program......')
+  print('Sending the Program...')
   send_PROG(prog, ser2)
 
   ser2.close()
-  print('done')
-  print('Bitte noch ein paar Sekunden warten, bis das Intelligent Interface mit der Programmausführung beginnt!')
+  print('Done.')
+  print('The Intelligent Interface will Execute the Program in about 2-3 Seconds.')
 
 
 

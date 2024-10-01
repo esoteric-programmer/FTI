@@ -1,9 +1,13 @@
 from abc import ABC, abstractmethod
 from enum import IntEnum
+from typing import Callable
 
-# not implemented yet: Terminal, Ton, Unterprogramm
-# not implemented: Meldung, Display, Ende (Ende: implizit!)
+# TODO: Unterprogramm
+# not implemented: Meldung
 # not tested yet: Variable, Position, Vergleich, ... mit einer anderen Eingabe als einer Konstanten
+
+def Ende(): # Ende-Baustein wird durch None-Referenz abgebildet
+  return None
 
 class Richtung(IntEnum):
     LINKS = 1
@@ -94,6 +98,9 @@ class Baustein(ABC):
     def _set_successor(self, succ: 'Baustein', slot):
         if slot < 0 or slot >= self.outgoing_trans:
             raise RuntimeError("Ungültiger Nachfolger-Slot")
+        if succ is None:
+          self._successor[slot] = succ
+          return
         if not succ.incoming_trans:
           raise RuntimeError("Baustein ohne eingehende Verbindung kann nicht als Nachfolger definiert werden")
         self._successor[slot] = succ
@@ -257,7 +264,6 @@ class Flanke(Baustein):
 
 
 
-
 class Variable(Baustein):
     def __init__(self, var: int, value: inputvalue):
         Baustein.__init__(self)
@@ -293,6 +299,12 @@ class Variable(Baustein):
         return [baustein_code, abs_code]
 
 
+class Display(Variable):
+    def __init__(self, display: int, value: inputvalue):
+      if display != 1 and display != 2:
+        raise RuntimeError("Ungültiges Display: "+str(display))
+      Variable.__init__(self,1,value)
+      self._countervar = 109+display
 
 
 class IncVariable(Baustein):
@@ -505,6 +517,46 @@ class NotAus(Baustein):
         return [baustein_code, abs_code]
 
 
+class Terminal(Baustein):
+    def __init__(self):
+        Baustein.__init__(self)
+        self._successor = []
+        self.e17 = False
+        self.e18 = False
+        self.e19 = False
+        self.e20 = False
+        self.e21 = False
+        self.e22 = False
+        self.e23 = False
+        self.e24 = False
+        self.e25 = False
+        self.e26 = False
+        self.ea = 0
+        self.eb = 0
+        self.ec = 0
+        self.ed = 0
+    @property
+    def incoming_trans(self):
+        return False
+    @property
+    def num_M2(self): # only additional messages needed
+        return 0
+    @property
+    def num_PT(self):
+        return 0
+    @property
+    def num_PL(self):
+        return 0
+    @property
+    def num_DL(self):
+        return 0
+    def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int):
+        if self._id <= 0:
+          raise RuntimeError("Cannot generate q code without knowing my own ID")
+        baustein_code = "#DW101="+str(self.ea)+"\n#DW102="+str(self.eb)+"\n#DW103="+str(self.ec)+"\n#DW104="+str(self.ed)+"\n#E17="+("1.000000" if self.e17 else "0.000000")+"\n#E18="+("1.000000" if self.e18 else "0.000000")+"\n#E19="+("1.000000" if self.e19 else "0.000000")+"\n#E20="+("1.000000" if self.e20 else "0.000000")+"\n#E21="+("1.000000" if self.e21 else "0.000000")+"\n#E22="+("1.000000" if self.e22 else "0.000000")+"\n#E23="+("1.000000" if self.e23 else "0.000000")+"\n#E24="+("1.000000" if self.e24 else "0.000000")+"\n#E25="+("1.000000" if self.e25 else "0.000000")+"\n#E26="+("1.000000" if self.e26 else "0.000000")+"\n#A10=0.000000\n#A11=0.000000\n"
+        abs_code = ""
+        return [baustein_code, abs_code]
+
 
 class Warte(Baustein):
     def __init__(self, wait: int):
@@ -535,10 +587,42 @@ class Warte(Baustein):
 
 
 
+
+class Ton(Baustein):
+    def __init__(self):
+        Baustein.__init__(self)
+        self._successor = [None]
+    @property
+    def incoming_trans(self):
+        return True
+    @property
+    def num_M2(self): # only additional messages needed
+        return 1
+    @property
+    def num_PT(self):
+        return 0
+    @property
+    def num_PL(self):
+        return 1
+    @property
+    def num_DL(self):
+        return 2
+    def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int):
+        if self._id <= 0:
+          raise RuntimeError("Cannot generate q code without knowing my own ID")
+        baustein_code = "&TON\n:7\n:5\n:PL"+str(offset_PL)+"\n:M"+split_num(offset_M1,8)+"\n:M"+split_num(offset_M2,8)+"\n:DL"+str(offset_DL)+"\n:DL"+str(offset_DL+1)+"\n#PL"+str(offset_PL)+"=50\n"
+        abs_code = self._abs_code(0,"M"+split_num(offset_M2,8))
+        return [baustein_code, abs_code]
+
+
+
+
 class Program:
   def __init__(self):
     self._bausteine = []
   def add_baustein(self, baustein: Baustein):
+    if baustein is None:
+      return
     if baustein.incoming_trans:
       start = Start()
       start.successor(baustein)
@@ -560,6 +644,7 @@ class Program:
     
 
   def build_q_file(self):
+    print('Generating Q File...')
     ## berechne benötigte Initialwerte
     offset_M1 = 8
     offset_M2 = 8
@@ -577,10 +662,10 @@ class Program:
       baustein.set_id(i)
       offset_M1 = offset_M1 + baustein.num_M2
       ablauf_size = ablauf_size + baustein.outgoing_trans
-      i = i + (1 if baustein.outgoing_trans > 0 else 0) ## alles ohne ausgehende transitionen belegt keinen Platz in der Ablaufsteuerung
+      i = i + (1 if baustein.outgoing_trans > 0 else 0) ## alles ohne definierbare ausgehende transitionen belegt keinen Platz in der Ablaufsteuerung
     q_header = "; Generated by Matthias Lutter's  Python Project\n"
     q_oben = "&BEG\n:10\n:15\n" # T_ms:10, Li_Nr:15
-    q_unten = "&ABS\n:"+str(ablauf_size)+"\n:"+str(len(bausteinliste))+"\n:M"+split_num(offset_M1,8)+"\n:DW121\n:DW"+str(121+ablauf_size)+"\n:DW"+str(121+ablauf_size+1)+"\n:DW"+str(121+2*ablauf_size+1)+"\n:M0.0\n"
+    q_unten = "#M"+split_num(offset_M1+i-1,8)+"\n#DW"+str(121+3*ablauf_size)+"\n&ABS\n:"+str(ablauf_size)+"\n:"+str(i)+"\n:M"+split_num(offset_M1,8)+"\n:DW121\n:DW"+str(121+ablauf_size)+"\n:DW"+str(121+ablauf_size+1)+"\n:DW"+str(121+2*ablauf_size+1)+"\n:M0.0\n"
     q_footer = "&END\n:15" # Li_Nr:15
     
     for baustein in bausteinliste:
@@ -593,3 +678,4 @@ class Program:
       offset_PL = offset_PL + baustein.num_PL
       offset_DL = offset_DL + baustein.num_DL
     return q_header + q_oben + q_unten + q_footer
+
