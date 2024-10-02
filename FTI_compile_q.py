@@ -35,8 +35,11 @@ def read_commands(file, datawidth):
 
             # Füge den Bezeichner und die ID zum Dictionary hinzu
             dictionary[identifier] = identifier_id
-        if len(file.read(3)) != 3: ## read NULL entry -- is always 4 bytes long, while 1 byte has already been read ;; TODO: test if everything of the 3 bytes is really ZERO -- if not: either raise exception or continue reading the array...
+        end_of_array = file.read(3) # read NULL entry at end of array. the NULL entry is always 4 bytes long (also in 32bit mode)
+        if len(end_of_array) != 3:
             raise ValueError("Fehler: Unerwartetes Ende der Datei am Ende des Arrays")
+        if end_of_array != b'\x00\x00\x00':
+            raise ValueError("Fehler: Unerwartetes Zeichen am Ende des Arrays")
         return dictionary
 
 
@@ -82,8 +85,9 @@ def read_symbols(file, datawidth):
 
             # Füge den Bezeichner und die ID zum Dictionary hinzu
             dictionary[identifier] = data
-        if len(file.read(7)) != 7: ## read NULL entry TODO: test if everything of the 3 bytes is really ZERO -- if not: either raise exception or continue reading the array...
+        if len(file.read(7)) != 7: ## read NULL entry TODO: test if everything of the 7 bytes is really ZERO -- if not: either raise exception or continue reading the array...
             print('error: Unerwartetes Ende der Datei am Ende des Arrays') ## however, since its the end of the file, we try to proceed
+        # TODO: check if EOF is reached. if not, the file contains additional information which we cannot parse and we should throw an Exception or at least print a warning
         return dictionary
 
 
@@ -277,7 +281,7 @@ def compile_q_file(q_file, att_file):
     for i in range(0,offsets[7]+1): ### 00-0f: word in FTI.ATT after 0x65fc-offset defines number of chunks
       data = struct.pack('>IH',0x00000000,0xffff) ## unused data?? -- what does it do? entry points of additional threads??
       if i == 1:
-        data = struct.pack('>IH',0x0000000a,offsets[2]) ## why 0x0a?? ## TODO: does this code the startoffset??
+        data = struct.pack('>IH',0x0000000a,offsets[2]) ## why 0x0000000a??
       unknown_data.extend(data)
     final_result.append(unknown_data)
     final_result = final_result + constants
@@ -297,8 +301,4 @@ def compile_q_file(q_file, att_file):
 
 ## if we want to write an MVL file, we can ignore the last chunk (program info), which is not part of the MVL file
 ## if we read an MVL file, we must create the program info by ourselfes
-
-
-
-## observed differences only in program_info (last CHUNK) and in padding of main program (last 2 bytes of the last result-CHUNK)
 

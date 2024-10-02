@@ -164,11 +164,7 @@ def compile_and_send_program(prog: Program, port: str):
   rom = get_ROM(ser2)
   print_version(ser2)
 
-  #print('Generating Code...')
-  #with open('TMP.ATT', 'wb') as f:
-  #    f.write(rom)
-
-  prog = compile_q_file(prog.build_q_file(), rom) #'TMP.ATT')
+  prog = compile_q_file(prog.build_q_file(), rom)
 
   print('Sending the Program...')
   send_PROG(prog, ser2)
@@ -177,7 +173,3 @@ def compile_and_send_program(prog: Program, port: str):
   print('Done.')
   print('The Intelligent Interface will Execute the Program in about 2-3 Seconds.')
 
-
-
-# command list: [2byte code, \x00-terminated string (command name)]*
-# &\x02ABS\x00;IAPR8\x00=\x9dJPZ\x00Y\x97NOP\x00\x00\x11BEG\x00\x00\x12END\x00Y\xc6Init\x00Y\xcdVRZF\x00?\xf0SMOT\x00B\x92SVAR\x00CoIVAR\x00F\x0fCMW\x00F\x87EVF\x00J\xf0T2D\x00M\xd2Inif\x00M\xdbNot\x00N\xdeFD10\x00O\x1bABB\x00O\x97ADDW\x00O\xd3SUBW\x00P\x1aDIVW\x00PbMULW\x00Q\x02SCHW\x00QPAND\x00Q\xbeOR\x00S\x10CMPW\x00TbFD01\x00UvFFR\x00U\xf2FFS\x00VCBGW\x00V\x94AWW\x00W\xfdABW\x00X*AWB\x00X\xe3TON\x00
