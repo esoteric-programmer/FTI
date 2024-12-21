@@ -1,4 +1,6 @@
 import tkinter as tk
+from tkinter import simpledialog
+from abc import ABC, abstractmethod
 
 # https://realpython.com/python-gui-tkinter/
 # https://tkinterpython.top/drawing/
@@ -11,46 +13,143 @@ import tkinter as tk
 
 
 
-
-class StartBaustein:
-    def __init__(self, canvas):
+class Baustein:
+    def __init__(self, canvas, x=None, y=None):
         self.x = 0
         self.y = 0
         self.canvas = canvas
-        # Dra line
-        self.line = canvas.create_line(0,0,0,0, fill='green', width=3)
-        # Draw an rectangle
-        self.rect = canvas.create_rectangle(0, 0, 0, 0, fill='white')
-        # Draw a circle
-        self.circle = canvas.create_oval(0, 0, 0, 0, fill='grey')
-        # Draw a circle
-        self.circle2 = canvas.create_oval(0, 0, 0, 0, fill='grey')
-        # Draw some text
-        self.text = canvas.create_text(0, 0, text="START", font=("Helvetica", 12), fill='blue')
-        # Call the method to draw the circle and rectangle
-        self.position(canvas.winfo_pointerx()-canvas.winfo_rootx(), canvas.winfo_pointery()-canvas.winfo_rooty())
+        self.elements = []
+        for obj in self.objects():
+          e = {}
+          e['element'] = obj[0]
+          e['x1'] = obj[1]
+          e['y1'] = obj[2]
+          if len(obj)>=5:
+            e['x2'] = obj[3]
+            e['y2'] = obj[4]
+            if len(obj) >= 9:
+              e['x3'] = obj[5]
+              e['y3'] = obj[6]
+              e['x4'] = obj[7]
+              e['y4'] = obj[8]
+          self.elements.append(e)
+        if x is None or y is None:
+          self.position(canvas.winfo_pointerx()-canvas.winfo_rootx(), canvas.winfo_pointery()-canvas.winfo_rooty())
+        else:
+          self.position(x,y)
 
     def position(self,x,y):
         # Update the position of the graphic based on the mouse cursor
         self.x = x
         self.y = y
 
-        # Move the graphic (ellipse, circle, and text) to the new position
-        self.canvas.coords(self.circle, x-70, y-10, x-50, y+10)  # Circle coordinates
-        self.canvas.coords(self.circle2, x+50, y-10, x+70, y+10)  # Circle coordinates
-        self.canvas.coords(self.rect, x-60, y-10, x+60, y+10)  # Ellipse coordinates
-        self.canvas.coords(self.text, x, y+2)  # Text position
-        self.canvas.coords(self.line, x,y+10,x,y+20)
+        for e in self.elements:
+          # Move the graphic (ellipse, circle, and text) to the new position
+          if 'x2' in e and 'y2' in e:
+            if 'x3' in e and 'y3' in e and 'x4' in e and 'y4' in e:
+              self.canvas.coords(e['element'], x+e['x1'], y+e['y1'], x+e['x2'], y+e['y2'], x+e['x3'], y+e['y3'], x+e['x4'], y+e['y4'])
+            else:
+              self.canvas.coords(e['element'], x+e['x1'], y+e['y1'], x+e['x2'], y+e['y2'])
+          else:
+            self.canvas.coords(e['element'], x+e['x1'], y+e['y1'])
 
     def delete(self):
-        self.canvas.delete(self.circle)
-        self.canvas.delete(self.circle2)
-        self.canvas.delete(self.rect)
-        self.canvas.delete(self.text)
-        self.canvas.delete(self.line)
+        for e in self.elements:
+          self.canvas.delete(e['element'])
+        self.elements = []
 
-    def print_pos(self):
-        print("Baustein at ("+str(self.x)+";"+str(self.y)+")")
+    def print(self):
+        print(self.__class__.__name__+" at ("+str(self.x)+";"+str(self.y)+")")
+
+    @abstractmethod
+    def objects(self):
+        pass
+
+
+class StartBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='white'), -60, -10, 60, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='grey'), -70, -10, -50, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='grey'), 50, -10, 70, 10],
+          [self.canvas.create_text(0, 0, text="START", font=("Helvetica", 12), fill='blue'), 0, 2]
+          ]
+      return objs
+      
+
+
+class BeepBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
+          [self.canvas.create_text(0, 0, text="BEEP", font=("Helvetica", 12), fill='blue'), 0, 2]
+          ]
+      return objs
+
+
+
+class ItemSelectionDialog(simpledialog.Dialog):
+    def __init__(self, parent, title, items):
+        self.items = items
+        self.selected_item = None
+        super().__init__(parent, title)
+
+    def body(self, master):
+        # Canvas for item preview
+        self.canvas = tk.Canvas(master, width=200, height=100, bg="white")
+        self.canvas.pack(pady=10)
+
+        # Scrollable listbox
+        self.listbox_frame = tk.Frame(master)
+        self.listbox_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.scrollbar = tk.Scrollbar(self.listbox_frame, orient=tk.VERTICAL)
+        self.listbox = tk.Listbox(self.listbox_frame, selectmode=tk.SINGLE, yscrollcommand=self.scrollbar.set, height=10)
+        
+        self.scrollbar.config(command=self.listbox.yview)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Populate listbox with items
+        for item in self.items:
+            self.listbox.insert(tk.END, item)
+
+        # Bind selection event
+        self.listbox.bind("<<ListboxSelect>>", self.on_item_select)
+
+        return self.listbox  # Focus initial widget
+
+    def on_item_select(self, event):
+        # Get the selected item
+        selection = self.listbox.curselection()
+        if selection:
+            index = selection[0]
+            self.selected_item = self.items[index]
+
+            # Update the preview in the canvas
+            self.canvas.delete("all")
+            if self.selected_item == "Start":
+              StartBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Beep":
+              BeepBaustein(self.canvas, 100, 50)
+            else:
+              self.canvas.create_text(100, 50, text=self.selected_item, font=("Arial", 14))
+
+    def apply(self):
+        # When OK is pressed, return the selected item
+        self.result = self.selected_item
+
+
+
+
+
 
 
 
@@ -58,14 +157,36 @@ bs = None
 fixed = True
 bausteine = []
 
+def function_rightclick(event):
+    global bs, fixed
+    if bs is not None:
+      bs.delete()
+      bs = None
+    fixed = True
+
+
 def insertBaustein():
   ## TODO: baustein-type-selection
-  global bs, fixed, innercanvas
-  if bs is None:
+  global bs, fixed, innercanvas, root
+  
+  ## cancel current insertion (if any)
+  function_rightclick(None)
+  
+  items = ["Beep", "Decrement Variable", "Display", "Eingang", "Ende", "Flanke", "Increment Variable", "Lampe", "Meldung", "Motor", "Notaus", "Position", "Reset", "Start", "Terminal", "Variable", "Vergleich", "Warte"]
+  dialog = ItemSelectionDialog(root, "Baustein auswählen", items)
+
+  if dialog.result == "Start":
     bs = StartBaustein(innercanvas)
-    fixed = False
+  if dialog.result == "Beep":
+    bs = BeepBaustein(innercanvas)
+  elif dialog.result:
+    print("ERROR: not implemented yet")
   else:
-    bs.position(innercanvas.winfo_pointerx()-innercanvas.winfo_rootx(), innercanvas.winfo_pointery()-innercanvas.winfo_rooty())
+    print("No item selected.")
+
+  if bs is not None:
+    fixed = False
+  
 
 def update_graphic(event):
     global bs, fixed
@@ -82,12 +203,7 @@ def callback(event):
     fixed = True
     bs = None
 
-def function_rightclick(event):
-    global bs, fixed
-    if bs is not None:
-      bs.delete()
-      bs = None
-    fixed = True
+
 
 
 root = tk.Tk()
@@ -246,7 +362,7 @@ root.mainloop()
 print("the following Bausteine have been created:")
 for b in bausteine:
   if b is not None:
-    b.print_pos()
+    b.print()
 
 exit(0)
 
