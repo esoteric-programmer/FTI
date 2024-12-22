@@ -42,7 +42,6 @@ class Baustein:
         # Update the position of the graphic based on the mouse cursor
         self.x = x
         self.y = y
-
         for e in self.elements:
           # Move the graphic (ellipse, circle, and text) to the new position
           if 'x2' in e and 'y2' in e:
@@ -52,6 +51,9 @@ class Baustein:
               self.canvas.coords(e['element'], x+e['x1'], y+e['y1'], x+e['x2'], y+e['y2'])
           else:
             self.canvas.coords(e['element'], x+e['x1'], y+e['y1'])
+
+    def onUserCreated(self):
+        pass
 
     def delete(self):
         for e in self.elements:
@@ -78,7 +80,6 @@ class StartBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="START", font=("Helvetica", 12), fill='blue'), 0, 2]
           ]
       return objs
-      
 
 
 class BeepBaustein(Baustein):
@@ -93,6 +94,40 @@ class BeepBaustein(Baustein):
           ]
       return objs
 
+
+class IncDecBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='white', outline='black'), -70, -10, 70, 10],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -50, -8, 30, 8],
+          ]
+      return objs
+    
+    # TODO: ask which variable should be incremented or decremented
+    def onUserCreated(self):
+        pass
+
+
+class IncBaustein(IncDecBaustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+        objs = super().objects()
+        objs.append([self.canvas.create_text(0, 0, text="INC", font=("Helvetica", 12), fill='blue'), 50, 2])
+        return objs
+
+
+class DecBaustein(IncDecBaustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+        objs = super().objects()
+        objs.append([self.canvas.create_text(0, 0, text="DEC", font=("Helvetica", 12), fill='blue'), 50, 2])
+        return objs
 
 
 class ItemSelectionDialog(simpledialog.Dialog):
@@ -139,6 +174,10 @@ class ItemSelectionDialog(simpledialog.Dialog):
               StartBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Beep":
               BeepBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Increment Variable":
+              IncBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Decrement Variable":
+              DecBaustein(self.canvas, 100, 50)
             else:
               self.canvas.create_text(100, 50, text=self.selected_item, font=("Arial", 14))
 
@@ -177,8 +216,12 @@ def insertBaustein():
 
   if dialog.result == "Start":
     bs = StartBaustein(innercanvas)
-  if dialog.result == "Beep":
+  elif dialog.result == "Beep":
     bs = BeepBaustein(innercanvas)
+  elif dialog.result == "Increment Variable":
+    bs = IncBaustein(innercanvas)
+  elif dialog.result == "Decrement Variable":
+    bs = DecBaustein(innercanvas)
   elif dialog.result:
     print("ERROR: not implemented yet")
   else:
@@ -198,10 +241,11 @@ def update_graphic(event):
 
 def callback(event):
     global bs, fixed
-    if bs is not None:
-      bausteine.append(bs)
     fixed = True
-    bs = None
+    if bs is not None:
+      bs.onUserCreated()
+      bausteine.append(bs)
+      bs = None
 
 
 
