@@ -160,9 +160,70 @@ class EingangBaustein(Baustein):
           ]
       return objs
     
-    # TODO: ask which entry should be checked // ask in which case we should go to the right?
+    # TODO: ask which entry should be read // ask in which case we should go to the right?
     def onUserCreated(self):
         pass
+
+
+class FlankeBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), 20, -8, 50, 8],
+          [self.canvas.create_text(0, 0, text="Flanke", font=("Helvetica", 12), fill='black'), -10, 2],
+          [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 12), fill='black'), 35, 2],
+          [self.canvas.create_line(0,0,0,0, fill='black', width=1), -55, -5, -45, -5],
+          [self.canvas.create_line(0,0,0,0, fill='black', width=1), -45, -5, -45, 5],
+          [self.canvas.create_line(0,0,0,0, fill='black', width=1), -45, 5, -35, 5],
+          ]
+      return objs
+    # TODO: ask which entry should be read
+    def onUserCreated(self):
+        pass
+
+
+class VergleichBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 30, 0, 40],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -30, 0, -40],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 70, 0, 80, 0],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), 0, -30, 70, 0, 0, 30, -70, 0],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -40, -8, 40, 8],
+          [self.canvas.create_text(0, 0, text="J", font=("Helvetica", 12), fill='black'), 50, 2],
+          [self.canvas.create_text(0, 0, text="N", font=("Helvetica", 12), fill='black'), 0, 22],
+          [self.canvas.create_text(0, 0, text="VAR ? = ?????", font=("Helvetica", 8), fill='black'), 0, 2],
+          ]
+      return objs
+    
+    # TODO: ask which variable should be read, which operator should be used, to which value it should be compared and in which case we should go to the right?
+    def onUserCreated(self):
+        pass
+
+
+class MotorBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -15, -8, 55, 8],
+          [self.canvas.create_text(0, 0, text="Motor", font=("Helvetica", 12), fill='black'), -40, 2],
+          [self.canvas.create_text(0, 0, text="? AUS", font=("Helvetica", 10), fill='black'), 20, 2],
+          ]
+      return objs
+    # TODO: ask which motor should be controlled and in which direction (Off, left, Right)
+    def onUserCreated(self):
+        pass
+
 
 class ItemSelectionDialog(simpledialog.Dialog):
     def __init__(self, parent, title, items):
@@ -216,17 +277,18 @@ class ItemSelectionDialog(simpledialog.Dialog):
               EingangBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Ende":
               EndeBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Flanke":
+              FlankeBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Vergleich":
+              VergleichBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Motor":
+              MotorBaustein(self.canvas, 100, 50)
             else:
               self.canvas.create_text(100, 50, text=self.selected_item, font=("Arial", 14))
 
     def apply(self):
         # When OK is pressed, return the selected item
         self.result = self.selected_item
-
-
-
-
-
 
 
 
@@ -264,6 +326,12 @@ def insertBaustein():
     bs = EingangBaustein(innercanvas)
   elif dialog.result == "Ende":
     bs = EndeBaustein(innercanvas)
+  elif dialog.result == "Flanke":
+    bs = FlankeBaustein(innercanvas)
+  elif dialog.result == "Vergleich":
+    bs = VergleichBaustein(innercanvas)
+  elif dialog.result == "Motor":
+    bs = MotorBaustein(innercanvas)
   elif dialog.result:
     print("ERROR: not implemented yet")
   else:
