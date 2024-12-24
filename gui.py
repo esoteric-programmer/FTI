@@ -82,6 +82,19 @@ class StartBaustein(Baustein):
       return objs
 
 
+class EndeBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='white'), -60, -10, 60, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='grey'), -70, -10, -50, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='grey'), 50, -10, 70, 10],
+          [self.canvas.create_text(0, 0, text="ENDE", font=("Helvetica", 12), fill='blue'), 0, 2]
+          ]
+      return objs
+
 class BeepBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
@@ -104,6 +117,7 @@ class IncDecBaustein(Baustein):
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
           [self.canvas.create_rectangle(0, 0, 0, 0, fill='white', outline='black'), -70, -10, 70, 10],
           [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -50, -8, 30, 8],
+          [self.canvas.create_text(0, 0, text="VAR ??", font=("Helvetica", 12), fill='blue'), -10, 2],
           ]
       return objs
     
@@ -117,7 +131,7 @@ class IncBaustein(IncDecBaustein):
         super().__init__(canvas, x, y)
     def objects(self):
         objs = super().objects()
-        objs.append([self.canvas.create_text(0, 0, text="INC", font=("Helvetica", 12), fill='blue'), 50, 2])
+        objs.append([self.canvas.create_text(0, 0, text="INC", font=("Helvetica", 12), fill='black'), 50, 2])
         return objs
 
 
@@ -126,9 +140,29 @@ class DecBaustein(IncDecBaustein):
         super().__init__(canvas, x, y)
     def objects(self):
         objs = super().objects()
-        objs.append([self.canvas.create_text(0, 0, text="DEC", font=("Helvetica", 12), fill='blue'), 50, 2])
+        objs.append([self.canvas.create_text(0, 0, text="DEC", font=("Helvetica", 12), fill='black'), 50, 2])
         return objs
 
+
+class EingangBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 30, 0, 40],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -30, 0, -40],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 70, 0, 80, 0],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), 0, -30, 70, 0, 0, 30, -70, 0],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -30, -8, 30, 8],
+          [self.canvas.create_text(0, 0, text="0", font=("Helvetica", 12), fill='black'), 50, 2],
+          [self.canvas.create_text(0, 0, text="1", font=("Helvetica", 12), fill='black'), 0, 22],
+          [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 12), fill='black'), 0, 2],
+          ]
+      return objs
+    
+    # TODO: ask which entry should be checked // ask in which case we should go to the right?
+    def onUserCreated(self):
+        pass
 
 class ItemSelectionDialog(simpledialog.Dialog):
     def __init__(self, parent, title, items):
@@ -177,7 +211,11 @@ class ItemSelectionDialog(simpledialog.Dialog):
             elif self.selected_item == "Increment Variable":
               IncBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Decrement Variable":
-              DecBaustein(self.canvas, 100, 50)
+              DecBaustein(self.canvas, 100, 50),
+            elif self.selected_item == "Eingang":
+              EingangBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Ende":
+              EndeBaustein(self.canvas, 100, 50)
             else:
               self.canvas.create_text(100, 50, text=self.selected_item, font=("Arial", 14))
 
@@ -222,6 +260,10 @@ def insertBaustein():
     bs = IncBaustein(innercanvas)
   elif dialog.result == "Decrement Variable":
     bs = DecBaustein(innercanvas)
+  elif dialog.result == "Eingang":
+    bs = EingangBaustein(innercanvas)
+  elif dialog.result == "Ende":
+    bs = EndeBaustein(innercanvas)
   elif dialog.result:
     print("ERROR: not implemented yet")
   else:
