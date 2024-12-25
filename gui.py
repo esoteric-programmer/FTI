@@ -186,6 +186,24 @@ class FlankeBaustein(Baustein):
         pass
 
 
+class VariableBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='white', outline='black'), -70, -10, 70, 10],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -40, -8, 60, 8],
+          [self.canvas.create_text(0, 0, text="VAR ? = ?????", font=("Helvetica", 8), fill='black'), 10, 2],
+          ]
+      return objs
+
+    # TODO: ask which variable the value should be assigned to and which value should be assigned
+    def onUserCreated(self):
+        pass
+
+
 class VergleichBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
@@ -221,6 +239,24 @@ class MotorBaustein(Baustein):
           ]
       return objs
     # TODO: ask which motor should be controlled and in which direction (Off, left, Right)
+    def onUserCreated(self):
+        pass
+
+
+class WarteBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -15, -8, 55, 8],
+          [self.canvas.create_text(0, 0, text="Warte", font=("Helvetica", 12), fill='black'), -40, 2],
+          [self.canvas.create_text(0, 0, text="0.0", font=("Helvetica", 10), fill='black'), 20, 2],
+          ]
+      return objs
+    # TODO: ask how long time should be waited
     def onUserCreated(self):
         pass
 
@@ -279,10 +315,14 @@ class ItemSelectionDialog(simpledialog.Dialog):
               EndeBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Flanke":
               FlankeBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Variable":
+              VariableBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Vergleich":
               VergleichBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Motor":
               MotorBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Warte":
+              WarteBaustein(self.canvas, 100, 50)
             else:
               self.canvas.create_text(100, 50, text=self.selected_item, font=("Arial", 14))
 
@@ -328,10 +368,14 @@ def insertBaustein():
     bs = EndeBaustein(innercanvas)
   elif dialog.result == "Flanke":
     bs = FlankeBaustein(innercanvas)
+  elif dialog.result == "Variable":
+    bs = VariableBaustein(innercanvas)
   elif dialog.result == "Vergleich":
     bs = VergleichBaustein(innercanvas)
   elif dialog.result == "Motor":
     bs = MotorBaustein(innercanvas)
+  elif dialog.result == "Warte":
+    bs = WarteBaustein(innercanvas)
   elif dialog.result:
     print("ERROR: not implemented yet")
   else:
