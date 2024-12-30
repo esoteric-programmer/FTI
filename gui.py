@@ -43,6 +43,13 @@ class Baustein:
         else:
           self.position(x,y)
 
+    def getConnections(self):
+        # each entry: x,y,outgoing?
+        return []
+
+    def getPosition(self):
+        return [self.x,self.y]
+
     def position(self,x,y):
         # Update the position of the graphic based on the mouse cursor
         self.x = x
@@ -65,8 +72,8 @@ class Baustein:
           self.canvas.delete(e['element'])
         self.elements = []
 
-    def print(self):
-        print(self.__class__.__name__+" at ("+str(self.x)+";"+str(self.y)+")")
+    def toString(self):
+        return self.__class__.__name__+" at ("+str(self.x)+";"+str(self.y)+")"
 
     @abstractmethod
     def objects(self):
@@ -86,6 +93,9 @@ class StartBaustein(Baustein):
           ]
       return objs
 
+    def getConnections(self):
+        return [[0,19,True]]
+
 
 class EndeBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
@@ -99,6 +109,9 @@ class EndeBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="ENDE", font=("Helvetica", 12), fill='blue'), 0, 2]
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-19,False]]
 
 class BeepBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
@@ -111,6 +124,9 @@ class BeepBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="BEEP", font=("Helvetica", 12), fill='blue'), 0, 2]
           ]
       return objs
+
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
 
 
 class IncDecBaustein(Baustein):
@@ -126,6 +142,9 @@ class IncDecBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="VAR ??", font=("Helvetica", 12), fill='blue'), -10, 2],
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
     
     def onUserCreated(self):
         while self.var <= 0 or self.var > 99:
@@ -172,6 +191,9 @@ class EingangBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 12), fill='black'), 0, 2],
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-39,False],[0,39,True],[79,0,True]]
 
     def onUserCreated(self):
         while self.eingang <= 0 or self.eingang >= 27:
@@ -208,6 +230,9 @@ class FlankeBaustein(Baustein):
           [self.canvas.create_line(0,0,0,0, fill='black', width=1), -45, 5, -35, 5],
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
 
     def onUserCreated(self):
         while self.eingang <= 0 or self.eingang >= 27:
@@ -240,6 +265,10 @@ class PositionBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="0", font=("Helvetica", 11), fill='black'), 17, 18],
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-34,False],[0,34,True]]
+      
     # TODO: ask INC/DEC, entry number, counter variable and target value
     def onUserCreated(self):
         pass
@@ -258,6 +287,9 @@ class VariableBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="VAR ? = ?????", font=("Helvetica", 8), fill='black'), 10, 2],
           ]
       return objs
+
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
 
     # TODO: ask which variable the value should be assigned to and which value should be assigned
     def onUserCreated(self):
@@ -280,6 +312,9 @@ class VergleichBaustein(Baustein):
           ]
       return objs
     
+    def getConnections(self):
+        return [[0,-39,False],[0,39,True],[79,0,True]]
+    
     # TODO: ask which variable should be read, which operator should be used, to which value it should be compared and in which case we should go to the right?
     def onUserCreated(self):
         pass
@@ -298,6 +333,10 @@ class MotorBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="? AUS", font=("Helvetica", 10), fill='black'), 20, 2],
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
+      
     # TODO: ask which motor should be controlled and in which direction (Off, left, Right)
     def onUserCreated(self):
         pass
@@ -316,6 +355,10 @@ class LampeBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="? AUS", font=("Helvetica", 10), fill='black'), 20, 2],
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
+      
     # TODO: ask which lamp should be controlled and should it turned On or Off
     def onUserCreated(self):
         pass
@@ -334,6 +377,10 @@ class WarteBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="0.0", font=("Helvetica", 10), fill='black'), 20, 2],
           ]
       return objs
+      
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
+      
     # TODO: ask how long time should be waited
     def onUserCreated(self):
         pass
@@ -351,6 +398,7 @@ class NotausResetBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 11), fill='black'), 30, 2],
           ]
       return objs
+
     # TODO: ask which entry should cause the action
     def onUserCreated(self):
         pass
@@ -456,14 +504,36 @@ class ItemSelectionDialog(simpledialog.Dialog):
 bs = None
 fixed = True
 bausteine = []
+drawFrom = None
 
 def function_rightclick(event):
-    global bs, fixed
+    global bs, fixed, innercanvas, drawFrom
     if bs is not None:
       bs.delete()
       bs = None
-    fixed = True
-
+      fixed = True
+    elif event is not None:
+      for b in bausteine:
+        if b is None:
+          continue
+        pos = b.getPosition()
+        conn = b.getConnections()
+        n = 0
+        for c in conn:
+          x=pos[0]+c[0]
+          y=pos[1]+c[1]
+          if abs(x-event.x)<=5 and abs(y-event.y)<=5:
+            if drawFrom is None and c[2]:
+              innercanvas.configure(cursor="dotbox")
+              drawFrom = [b,n,x,y]
+            elif drawFrom is not None and not c[2]:
+              print("TODO: draw from "+drawFrom[0].toString()+", item no "+str(drawFrom[1])+" @("+str(drawFrom[2])+","+str(drawFrom[3])+") to "+b.toString()+", item no "+str(n)+" @("+str(x)+","+str(y)+")")
+              innercanvas.configure(cursor="arrow")
+              drawFrom = None
+          n = n+1
+    elif event is None:
+      innercanvas.configure(cursor="arrow")
+      drawFrom = None
 
 def insertBaustein():
   ## TODO: baustein-type-selection
@@ -514,8 +584,8 @@ def insertBaustein():
     fixed = False
   
 
-def update_graphic(event):
-    global bs, fixed
+def callback_motion(event):
+    global bs, fixed, drawFrom
     if not fixed and bs:
       x, y = event.x, event.y
       bs.position(x,y)
@@ -679,7 +749,7 @@ for y in range(0, canvas_height, 50):  # Horizontal dashed lines every 50 pixels
 
 
 
-innercanvas.bind("<Motion>", update_graphic)
+innercanvas.bind("<Motion>", callback_motion)
 innercanvas.bind("<Button-1>", callback)
 innercanvas.bind("<Button-3>", function_rightclick)
 
@@ -689,7 +759,7 @@ root.mainloop()
 print("the following Bausteine have been created:")
 for b in bausteine:
   if b is not None:
-    b.print()
+    print(b.toString())
 
 exit(0)
 
