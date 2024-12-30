@@ -116,6 +116,7 @@ class BeepBaustein(Baustein):
 class IncDecBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.var = 0
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
@@ -126,9 +127,14 @@ class IncDecBaustein(Baustein):
           ]
       return objs
     
-    # TODO: ask which variable should be incremented or decremented
     def onUserCreated(self):
-        pass
+        while self.var <= 0 or self.var > 99:
+         try:
+          self.var = int(tk.simpledialog.askstring("Variable", "Nummer der Variablen [1-99]"))
+         except:
+          pass
+        self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[4]['element'], text="VAR "+str(self.var))
 
 
 class IncBaustein(IncDecBaustein):
@@ -152,6 +158,8 @@ class DecBaustein(IncDecBaustein):
 class EingangBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.eingang = 0
+        self.rightOn = -1
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 30, 0, 40],
@@ -164,31 +172,51 @@ class EingangBaustein(Baustein):
           [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 12), fill='black'), 0, 2],
           ]
       return objs
-    
-    # TODO: ask which entry should be read // ask in which case we should go to the right?
+
     def onUserCreated(self):
-        pass
+        while self.eingang <= 0 or self.eingang >= 27:
+         try:
+          self.eingang = int(tk.simpledialog.askstring("Eingang", "Nummer der Eingangs [1-26]"))
+         except:
+          pass
+        while self.rightOn < 0 or self.rightOn > 1:
+         try:
+          self.rightOn = int(tk.simpledialog.askstring("Verzweigung", "Verzweigung rechts bei [0/1]"))
+         except:
+          pass
+        self.canvas.itemconfigure(self.elements[4]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[7]['element'], text="E "+str(self.eingang))
+        if self.rightOn == 1:
+          self.canvas.itemconfigure(self.elements[5]['element'], text="1")
+          self.canvas.itemconfigure(self.elements[6]['element'], text="0")
 
 
 class FlankeBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.eingang = 0
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
           [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
-          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), 20, -8, 50, 8],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), 20, -8, 56, 8],
           [self.canvas.create_text(0, 0, text="Flanke", font=("Helvetica", 12), fill='black'), -10, 2],
-          [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 12), fill='black'), 35, 2],
+          [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 12), fill='black'), 38, 2],
           [self.canvas.create_line(0,0,0,0, fill='black', width=1), -55, -5, -45, -5],
           [self.canvas.create_line(0,0,0,0, fill='black', width=1), -45, -5, -45, 5],
           [self.canvas.create_line(0,0,0,0, fill='black', width=1), -45, 5, -35, 5],
           ]
       return objs
-    # TODO: ask which entry should be read
+
     def onUserCreated(self):
-        pass
+        while self.eingang <= 0 or self.eingang >= 27:
+         try:
+          self.eingang = int(tk.simpledialog.askstring("Eingang", "Nummer der Eingangs [1-26]"))
+         except:
+          pass
+        self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[5]['element'], text="E "+str(self.eingang))
 
 
 
