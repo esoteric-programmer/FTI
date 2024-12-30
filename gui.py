@@ -12,6 +12,11 @@ from abc import ABC, abstractmethod
 # https://stackoverflow.com/questions/10057672/correct-way-to-implement-a-custom-popup-tkinter-dialog-box , https://stackoverflow.com/questions/16803686/how-to-create-a-modal-dialog-in-tkinter
 
 
+## TODO: missing Baustein classes:
+## - Display
+## - Meldung
+## - Terminal
+
 
 class Baustein:
     def __init__(self, canvas, x=None, y=None):
@@ -186,6 +191,33 @@ class FlankeBaustein(Baustein):
         pass
 
 
+
+class PositionBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 25, 0, 35],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -25, 0, -35],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -50, -25, 70, -25, 50, 25, -70, 25],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='white', outline='black'), -48, -23, -20, -8],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -10, -23, 45, -9],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -10, -7, 45, 7],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -10, 9, 45, 23],
+          [self.canvas.create_text(0, 0, text="ZV", font=("Helvetica", 11), fill='black'), -25, 2],
+          [self.canvas.create_text(0, 0, text="HW", font=("Helvetica", 11), fill='black'), -25, 18],
+          [self.canvas.create_text(0, 0, text="INC", font=("Helvetica", 11), fill='black'), -33, -14],
+          [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 11), fill='black'), 17, -14],
+          [self.canvas.create_text(0, 0, text="VAR ?", font=("Helvetica", 11), fill='black'), 17, 2],
+          [self.canvas.create_text(0, 0, text="0", font=("Helvetica", 11), fill='black'), 17, 18],
+          ]
+      return objs
+    # TODO: ask INC/DEC, entry number, counter variable and target value
+    def onUserCreated(self):
+        pass
+
+
+
 class VariableBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
@@ -243,6 +275,24 @@ class MotorBaustein(Baustein):
         pass
 
 
+class LampeBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), -15, -8, 55, 8],
+          [self.canvas.create_text(0, 0, text="Lampe", font=("Helvetica", 11), fill='black'), -40, 2],
+          [self.canvas.create_text(0, 0, text="? AUS", font=("Helvetica", 10), fill='black'), 20, 2],
+          ]
+      return objs
+    # TODO: ask which lamp should be controlled and should it turned On or Off
+    def onUserCreated(self):
+        pass
+
+
 class WarteBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
@@ -259,6 +309,41 @@ class WarteBaustein(Baustein):
     # TODO: ask how long time should be waited
     def onUserCreated(self):
         pass
+
+
+class NotausResetBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='white'), -60, -10, 60, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='grey'), -70, -10, -50, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='grey'), 50, -10, 70, 10],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='pink', outline='black'), 10, -8, 50, 7],
+          [self.canvas.create_text(0, 0, text="E ?", font=("Helvetica", 11), fill='black'), 30, 2],
+          ]
+      return objs
+    # TODO: ask which entry should cause the action
+    def onUserCreated(self):
+        pass
+
+
+class NotausBaustein(NotausResetBaustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+        objs = super().objects()
+        objs.append([self.canvas.create_text(0, 0, text="NOTAUS", font=("Helvetica", 10), fill='red'), -20, 2])
+        return objs
+
+
+class ResetBaustein(NotausResetBaustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+    def objects(self):
+        objs = super().objects()
+        objs.append([self.canvas.create_text(0, 0, text="RESET", font=("Helvetica", 10), fill='blue'), -20, 2])
+        return objs
 
 
 class ItemSelectionDialog(simpledialog.Dialog):
@@ -315,14 +400,22 @@ class ItemSelectionDialog(simpledialog.Dialog):
               EndeBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Flanke":
               FlankeBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Position":
+              PositionBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Variable":
               VariableBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Vergleich":
               VergleichBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Motor":
               MotorBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Lampe":
+              LampeBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Warte":
               WarteBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Notaus":
+              NotausBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Reset":
+              ResetBaustein(self.canvas, 100, 50)
             else:
               self.canvas.create_text(100, 50, text=self.selected_item, font=("Arial", 14))
 
@@ -368,14 +461,22 @@ def insertBaustein():
     bs = EndeBaustein(innercanvas)
   elif dialog.result == "Flanke":
     bs = FlankeBaustein(innercanvas)
+  elif dialog.result == "Position":
+    bs = PositionBaustein(innercanvas)
   elif dialog.result == "Variable":
     bs = VariableBaustein(innercanvas)
   elif dialog.result == "Vergleich":
     bs = VergleichBaustein(innercanvas)
   elif dialog.result == "Motor":
     bs = MotorBaustein(innercanvas)
+  elif dialog.result == "Lampe":
+    bs = LampeBaustein(innercanvas)
   elif dialog.result == "Warte":
     bs = WarteBaustein(innercanvas)
+  elif dialog.result == "Notaus":
+    bs = NotausBaustein(innercanvas)
+  elif dialog.result == "Reset":
+    bs = ResetBaustein(innercanvas)
   elif dialog.result:
     print("ERROR: not implemented yet")
   else:
