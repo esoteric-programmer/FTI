@@ -110,9 +110,40 @@ def a_star(start, target):
     #print("all neighbours processed, so "+str(cur_pt)+" has been removed from the openSet")
   return None
 
-def drawPath(path):
-  print("TODO: path drawing not implemented yet :-(")
+def simplifyPath(path):
+  if len(path)<1 or path is None:
+    return []
+  if len(path)<2:
+    return [path[0], path[0]]
+  if len(path)==2:
+    return path
+  ## simplify: find segments without changing directions
+  start = path[0]
+  direction = [path[1][0] - path[0][0], path[1][1] - path[0][1]]
+  idx = 1
+  pathes = []
+  while idx+1 < len(path):
+    new_direction = [path[idx+1][0] - path[idx][0], path[idx+1][1] - path[idx][1]]
+    if new_direction[0] == direction[0] and new_direction[1] == direction[1]:
+      idx = idx+1
+      continue
+    print("old direction: "+str(direction)+", new direction: "+str(new_direction))
+    pathes.append( [start, path[idx]] )
+    start = path[idx]
+    direction = new_direction
+    idx = idx+1
+  pathes.append( [start, path[idx]] )
+  return pathes
 
+def drawPath(path):
+  global innercanvas
+  print("TODO: path drawing not implemented yet :-(")
+  pathes = simplifyPath(path)
+  print("simplified: "+str(pathes))
+  arrow = 'last'
+  for path in reversed(pathes):
+    innercanvas.create_line(path[0][0],path[0][1],path[1][0],path[1][1], fill='green', width=3, arrow=arrow)
+    arrow = 'none'
 
 
 
