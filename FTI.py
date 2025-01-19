@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from typing import Callable, List
+from typing import Callable, List, Dict
 
 # TODO: Unterprogramm
 # not implemented: Meldung
@@ -75,6 +75,9 @@ class Baustein(ABC):
         self._PL = PL
         self._DL = DL
         self._id = 0
+    @abstractmethod
+    def clone(self) -> 'Baustein': # calls the constructor of the Baustein object again with the original arguments; successors etc. won't be cloned
+      pass
     def set_id(self, id: int) -> None:
       self._id = id
     @property
@@ -95,7 +98,7 @@ class Baustein(ABC):
     @property
     def num_DL(self) -> int:
         return self._DL
-    def _set_successor(self, succ: 'Baustein', slot: int) -> None:
+    def set_successor(self, succ: 'Baustein', slot: int) -> None:
         if slot < 0 or slot >= self.outgoing_trans:
             raise RuntimeError("Ungültiger Nachfolger-Slot")
         if succ is None:
@@ -107,15 +110,15 @@ class Baustein(ABC):
     def successor(self, succ: 'Baustein') -> None:
       if self.outgoing_trans != 1:
         raise RuntimeError("Es existiert kein eindeutiger Nachfolger bei diesem Bausteintyp")
-      self._set_successor(succ,0)
+      self.set_successor(succ,0)
     def on_true(self, succ: 'Baustein') -> None:
       if self.outgoing_trans != 2:
         raise RuntimeError("Dieser Bausteintyp implementiert keine bedingte Verzweigung")
-      self._set_successor(succ,0)
+      self.set_successor(succ,0)
     def on_false(self, succ: 'Baustein') -> None:
       if self.outgoing_trans != 2:
         raise RuntimeError("Dieser Bausteintyp implementiert keine bedingte Verzweigung")
-      self._set_successor(succ,1)
+      self.set_successor(succ,1)
     def get_successor(self, slot: int) -> 'Baustein':
       if slot < 0 or slot >= self.outgoing_trans:
         return None
@@ -138,6 +141,8 @@ class Baustein(ABC):
 class Start(Baustein):
     def __init__(self):
         Baustein.__init__(self,0,1,2,0,0,0)
+    def clone(self) -> 'Start':
+      return Start()
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -165,6 +170,8 @@ class Motor(Baustein):
           raise RuntimeError("Ungültige Motornummer: "+str(motor))
         self._motor = motor
         self._direction = int(direction)
+    def clone(self) -> 'Motor':
+      return Motor(self._motor, self._direction)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -184,6 +191,8 @@ class Lampe(Motor):
       if lampe <= 0 or lampe > 8:
         raise RuntimeError("Ungültige Lampennummer: "+str(lampe))
       Motor.__init__(self,lampe,Richtung.RECHTS if on else Richtung.AUS)
+    def clone(self) -> 'Lampe':
+      return Lampe(self._motor, False if self._direction == Richtung.AUS else True)
 
 
 class Eingang(Baustein):
@@ -192,6 +201,8 @@ class Eingang(Baustein):
         if eingang <= 0 or eingang > 26:
           raise RuntimeError("Ungültige Eingangsnummer: "+str(eingang))
         self._eingang = eingang
+    def clone(self) -> 'Eingang':
+      return Eingang(self._eingang)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -211,6 +222,8 @@ class Flanke(Baustein):
         if eingang <= 0 or eingang > 26:
           raise RuntimeError("Ungültige Eingangsnummer: "+str(eingang))
         self._eingang = eingang
+    def clone(self) -> 'Flanke':
+      return Flanke(self._eingang)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -236,6 +249,8 @@ class Variable(Baustein):
           raise RuntimeError("Ungültiger zugewiesener Wert. Must be Constant, Variable, Terminal Input, or Analog Input")
         self._target = value
         self._countervar = var
+    def clone(self) -> 'Variable':
+      return Variable(self._countervar, self._target)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -261,6 +276,8 @@ class Display(Variable):
         raise RuntimeError("Ungültiges Display: "+str(display))
       Variable.__init__(self,1,value)
       self._countervar = 109+display
+    def clone(self) -> 'Display':
+      return Display(self._countervar-109, self._target)
 
 
 class IncVariable(Baustein):
@@ -270,6 +287,8 @@ class IncVariable(Baustein):
           raise RuntimeError("Ungültige Variable: "+str(eingang))
         self._countervar = var
         self._inc = 2
+    def clone(self) -> 'IncVariable':
+      return IncVariable(self._countervar)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -288,6 +307,8 @@ class DecVariable(IncVariable):
     def __init__(self, var: int):
         IncVariable.__init__(self, var)
         self._inc = 1
+    def clone(self) -> 'DecVariable':
+      return DecVariable(self._countervar)
 
 
 class Vergleich(Baustein):
@@ -309,6 +330,8 @@ class Vergleich(Baustein):
           raise RuntimeError("Ungültiger Vergleichsoperator. Must be '=', '>', or '<', but was "+str(operator))
         self._target = target
         self._countervar = var
+    def clone(self) -> 'Vergleich':
+      return Vergleich(self._countervar, self._target, (['=','>','<'])[self._operator-1])
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -344,6 +367,8 @@ class Position(Baustein):
         self._target = target
         self._countervar = countervar
         self._decrement = decrement
+    def clone(self) -> 'Position':
+      return Position(self._eingang, self._target, self._countervar, self._decrement)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int) -> List[str]:
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -369,6 +394,9 @@ class Reset(Baustein):
           raise RuntimeError("Ungültige Eingangsnummer: "+str(eingang))
         self._eingang = eingang
         self._code = 13 # RESET
+    def clone(self) -> 'Reset':
+      ## TODO: print warning since this is not recommended?
+      return Reset(self._eingang)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int):
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -385,6 +413,9 @@ class NotAus(Reset):
     def __init__(self, eingang: int):
         Reset.__init__(self,eingang)
         self._code = 12 # NOTAUS
+    def clone(self) -> 'NotAus':
+      ## TODO: print warning since this is not recommended?
+      return NotAus(self._eingang)
 
 
 class Terminal(Baustein):
@@ -404,6 +435,9 @@ class Terminal(Baustein):
         self.eb = 0
         self.ec = 0
         self.ed = 0
+    def clone(self) -> 'Terminal':
+      ## TODO: print warning since this is not recommended?
+      return Terminal()
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int):
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -433,6 +467,8 @@ class Warte(Baustein):
     def __init__(self, wait: int):
         Baustein.__init__(self,1,1,1,0,1,2)
         self._waittime = wait
+    def clone(self) -> 'Warte':
+      return Warte(self._waittime)
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int):
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -454,6 +490,8 @@ class Warte(Baustein):
 class Ton(Baustein):
     def __init__(self):
         Baustein.__init__(self,1,1,1,0,1,2)
+    def clone(self) -> 'Ton':
+      return Ton()
     def get_q_code(self, offset_M1: int, offset_M2: int, offset_PT: int, offset_PL: int, offset_DL: int):
         if self._id <= 0:
           raise RuntimeError("Cannot generate q code without knowing my own ID")
@@ -554,3 +592,71 @@ class Program:
       offset_DL = offset_DL + baustein.num_DL
     return q_header + q_oben + q_unten + q_footer
 
+
+
+class UP_Instance:
+  def __init__(self, incoming: List[Baustein], outgoing: List[Callable[[Baustein], None]]):
+    self._incoming = incoming
+    self._outgoing = outgoing
+
+  def get_incoming(id: int) -> Baustein:
+    return self._incoming[id]
+
+  def set_successor(succ: Baustein, id: int) -> None:
+    if self._outgoing[id] is not None:
+      self._outgoing[id](succ)
+
+
+
+class Unterprogramm:
+  def __init__(self):
+    self._inputs = []
+    self._outputs = []
+    self._other = []
+
+  def add_input_connector(input_id: int, input_baustein: Baustein) -> None: # Einstiegspunkte in das UP; hier den jeweils aufzurufenden ersten Baustein des UPs angeben
+    if input_baustein is not None and not input_baustein.incoming_trans:
+      raise RuntimeException('Baustein hat keine eingehende Verbindung')
+    self._inputs[input_id] = input_baustein
+
+  def add_output_connector(output_id: int, successor_func: Callable[[Baustein], None]) -> None: # Fortsetzung des Programmflusses am UP-Ende; hier die Funktionen (successor, on_true, on_false) der jeweils letzten Bausteine angeben
+    self._outputs[output_id] = successor_func
+
+  def add_output_connector_by_id(output_id: int, baustein: Baustein, successor_id: int) -> None: # Fortsetzung des Programmflusses am UP-Ende; hier die Funktionen (successor, on_true, on_false) der jeweils letzten Bausteine angeben
+    self._outputs[output_id] = [baustein, successor_id]
+
+  def add_baustein(self, baustein: Baustein) -> None: # Bausteine ohne Eingänge wie Start, Reset, Terminal, ... // nicht empfehlenswert, aber unterstützt
+    if baustein is None:
+      return
+    if baustein.incoming_trans:
+      start = Start()
+      start.successor(baustein)
+      baustein = start
+    self._other.append(baustein)
+
+  @staticmethod
+  def _get_successor_func(baustein: Baustein, slot: int):
+    def wrapper():
+        return baustein.get_successor(slot)
+    return wrapper
+
+  def _clone_recursive(baustein: Baustein, mapping: Dict[Baustein,Baustein]) -> Baustein:
+    # TODO: successor-functionpointer-list vs. cloned successor functionpointer-list
+    if baustein in mapping:
+      return baustein[mapping]
+    mapping[baustein] = baustein.clone()
+    for i in range(0,baustein.outgoing_trans):
+      if baustein.get_successor(i) is not None:
+        mapping[baustein].set_successor(self._clone_recursive(baustein.get_successor(i), mapping),i)
+    return mapping[baustein]
+
+  def instantiate(program: Program) -> UP_Instance:
+    # TODO: clone everything, then create UP_Instance with references of cloned program
+    inputs = []
+    outputs = []
+    mapping = {}
+    for inp in self._inputs:
+      inputs.append(Unterprogramm._clone_recursive(inp, mapping))
+      ## TODO: update successor_func and add to outputs...
+    return UP_Instance(inputs, outputs)
+    pass
