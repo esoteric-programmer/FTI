@@ -11,21 +11,21 @@ class Mode(Enum):
   REMOVE=2
   LINK=3
 
-# https://realpython.com/python-gui-tkinter/
-# https://tkinterpython.top/drawing/
-# https://chatgpt.com/share/67640442-7e84-8004-a4e5-9526cc30ab9e
-# https://www.python-kurs.eu/tkinter_menus.php
-# https://inf-schule.de/software/gui/entwicklung_tkinter/fensterdialoge/messagebox
-# https://www.geeksforgeeks.org/changing-the-mouse-cursor-tkinter/
-# https://www.tutorialspoint.com/python/tk_scrollbar.htm
-# https://stackoverflow.com/questions/10057672/correct-way-to-implement-a-custom-popup-tkinter-dialog-box , https://stackoverflow.com/questions/16803686/how-to-create-a-modal-dialog-in-tkinter
 
-
-## TODO: missing Baustein classes:
-## - Display
-## - Meldung
-## - Terminal
-
+## TODO
+## save Baustein connections and canvas line objects in some datastructure so it can be considered when compiling the program...
+## forbid duplicate connections
+## compile for active mode
+## speed up a* search, e.g. by searching on a graph instead of canvas pixels
+## enhance bounding box // pixels occipied by Baustein
+## handle impossible connections by disabling bounding box checks
+## implement missing Baustein dialog boxes/properties
+## make Bausteine editable, moveable and removeable
+## make connection moveable and deleteable
+## subprograms
+## implement missing Baustein classes: Display, Meldung, Terminal
+## save project, open project (compatible to LLWin 2.1 file format??)
+## passive mode
 
 
 
@@ -137,7 +137,6 @@ def simplifyPath(path):
 
 def drawPath(path):
   global innercanvas
-  print("TODO: path drawing not implemented yet :-(")
   pathes = simplifyPath(path)
   print("simplified: "+str(pathes))
   arrow = 'last'
@@ -683,7 +682,7 @@ def function_rightclick(event):
                 path = a_star(drawFrom[2:4], [x,y])
                 print("path: "+str(path))
                 # draw it!!
-                drawPath(path) # TODO: save conection of Bausteine in some datastructure so that it can be considered when compiling the program...
+                drawPath(path)
               except Exception as e:
                 print(f"Exception: {type(e).__name__}")
                 print(f"Details: {e}")
