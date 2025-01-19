@@ -38,13 +38,15 @@ def get_min_cost(openSet, costs, target):
   best_node = -1
   for idx, p in enumerate(openSet):
     csts = costs[p[0]][p[1]][0] + manhattan(p, target)
+    #print("est.: "+str(p)+" has costs "+str(csts))
     if csts < min_cost:
       min_cost = csts
       best_node = idx
-  return idx
+  return best_node
 
 
 def reconstruct_path(start, target, costs):
+  #print("FOUND PATH, NOW RECONSTRUCTING!!")
   path = []
   cur = target
   while cur[0] != start[0] or cur[1] != start[1]:
@@ -68,11 +70,14 @@ def a_star(start, target):
   openSet = [start]
   costs[ start[0]][ start[1] ] = [0, None]
   while len(openSet) > 0:
+    #print("openSet = "+str(openSet))
     cur_idx = get_min_cost(openSet, costs, target)
     cur_pt = openSet[cur_idx]
+    #print("best node @"+str(cur_idx)+": "+str(cur_pt)+" with min estimated costs of "+str(costs[cur_pt[0]][cur_pt[1]][0] + manhattan(cur_pt, target)))
     if cur_pt[0] == target[0] and cur_pt[1] == target[1]:
       return reconstruct_path(start, target, costs)
     cur_costs = costs[cur_pt[0]][cur_pt[1]][0]
+    #print("current costs="+str(cur_costs))
     for n in neighbours:
       new_pt = [ cur_pt[0]+n[0], cur_pt[1] + n[1] ]
       if new_pt[0] < 0 or new_pt[0] >= canvas_width or new_pt[1] < 0 or new_pt[1] >= canvas_height:
@@ -82,24 +87,31 @@ def a_star(start, target):
       for b in bausteine:
         bb = b.getBoundingBox()
         if new_pt[0] >= bb[0] and new_pt[0] < bb[2] and new_pt[1] >= bb[1] and new_pt[1] < bb[3]:
+          #print(str(new_pt)+" lies inside bb ("+str(bb)+")")
           skip = True
           break
       if skip:
         continue
+      #print("checking neighbour "+str(new_pt))
       if costs[new_pt[0]][new_pt[1]][0] > cur_costs+1:
+        #print("will decrease costs from "+str(costs[new_pt[0]][new_pt[1]][0])+" to "+str(cur_costs+1))
         costs[new_pt[0]][new_pt[1]] = [ cur_costs+1, cur_pt ]
         ## append to openSet if not already inside
         in_list = False
         for x in openSet:
           if x[0] == new_pt[0] and x[1] == new_pt[1]:
             in_list = True
+            #print("... but is already in openSet")
             break
         if not in_list:
+          #print("... so we are adding the neighbour to the openSet")
           openSet.append(new_pt)
     openSet.pop(cur_idx)
+    #print("all neighbours processed, so "+str(cur_pt)+" has been removed from the openSet")
   return None
 
-
+def drawPath(path):
+  print("TODO: path drawing not implemented yet :-(")
 
 
 
@@ -186,7 +198,7 @@ class StartBaustein(Baustein):
     def getConnections(self):
         return [[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-10,self.x+70,self.y+20]
+        return [self.x-70,self.y-10,self.x+70,self.y+15]
 
 
 class EndeBaustein(Baustein):
@@ -204,7 +216,7 @@ class EndeBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+10]
+        return [self.x-70,self.y-15,self.x+70,self.y+10]
 
 class BeepBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
@@ -220,7 +232,7 @@ class BeepBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+20]
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
 
 
 class IncDecBaustein(Baustein):
@@ -239,7 +251,7 @@ class IncDecBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+20]
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
     def onUserCreated(self):
         while self.var <= 0 or self.var > 99:
          try:
@@ -288,7 +300,7 @@ class EingangBaustein(Baustein):
     def getConnections(self):
         return [[0,-39,False],[0,39,True],[79,0,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-40,self.x+70,self.y+40]
+        return [self.x-70,self.y-35,self.x+75,self.y+35]
     def onUserCreated(self):
         while self.eingang <= 0 or self.eingang >= 27:
          try:
@@ -327,7 +339,7 @@ class FlankeBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+20]
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
     def onUserCreated(self):
         while self.eingang <= 0 or self.eingang >= 27:
          try:
@@ -362,7 +374,7 @@ class PositionBaustein(Baustein):
     def getConnections(self):
         return [[0,-34,False],[0,34,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-35,self.x+70,self.y+35]
+        return [self.x-70,self.y-30,self.x+70,self.y+30]
     # TODO: ask INC/DEC, entry number, counter variable and target value
     def onUserCreated(self):
         pass
@@ -384,7 +396,7 @@ class VariableBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+20]
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
     # TODO: ask which variable the value should be assigned to and which value should be assigned
     def onUserCreated(self):
         pass
@@ -408,7 +420,7 @@ class VergleichBaustein(Baustein):
     def getConnections(self):
         return [[0,-39,False],[0,39,True],[79,0,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-40,self.x+70,self.y+40]
+        return [self.x-70,self.y-35,self.x+75,self.y+35]
     # TODO: ask which variable should be read, which operator should be used, to which value it should be compared and in which case we should go to the right?
     def onUserCreated(self):
         pass
@@ -430,7 +442,7 @@ class MotorBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+20]
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
     # TODO: ask which motor should be controlled and in which direction (Off, left, Right)
     def onUserCreated(self):
         pass
@@ -452,7 +464,7 @@ class LampeBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+20]
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
     # TODO: ask which lamp should be controlled and should it turned On or Off
     def onUserCreated(self):
         pass
@@ -474,7 +486,7 @@ class WarteBaustein(Baustein):
     def getConnections(self):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
-        return [self.x-70,self.y-20,self.x+70,self.y+20]
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
     # TODO: ask how long time should be waited
     def onUserCreated(self):
         pass
@@ -632,12 +644,15 @@ def function_rightclick(event):
               drawFrom = [b,n,x,y]
               mode = Mode.LINK
             elif drawFrom is not None and not c[2] and mode == Mode.LINK:
-              print("TODO: draw from "+drawFrom[0].toString()+", item no "+str(drawFrom[1])+" @("+str(drawFrom[2])+","+str(drawFrom[3])+") to "+b.toString()+", item no "+str(n)+" @("+str(x)+","+str(y)+")")
+              print("searching path from "+drawFrom[0].toString()+", item no "+str(drawFrom[1])+" @("+str(drawFrom[2])+","+str(drawFrom[3])+") to "+b.toString()+", item no "+str(n)+" @("+str(x)+","+str(y)+")")
               innercanvas.configure(cursor="arrow")
               try:
                 #print(str(drawFrom[2:4]))
                 #print(str([x,y]))
-                print("path: "+str(a_star(drawFrom[2:4], [x,y])))
+                path = a_star(drawFrom[2:4], [x,y])
+                print("path: "+str(path))
+                # draw it!!
+                drawPath(path) # TODO: save conection of Bausteine in some datastructure so that it can be considered when compiling the program...
               except Exception as e:
                 print(f"Exception: {type(e).__name__}")
                 print(f"Details: {e}")
