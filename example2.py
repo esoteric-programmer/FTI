@@ -5,6 +5,7 @@ from FTI_com import compile_and_send_program
 prog = FTI.Program()
 
 start = FTI.Start() #optional, siehe unten
+start.clone()
 eingang = FTI.Eingang(19)
 wait = FTI.Warte(500)
 lampe = FTI.Lampe(2, True)
@@ -25,4 +26,4 @@ prog.add_baustein(start) # wird hier ein Baustein mit eingehender Transition, z.
 prog.add_baustein(terminal)
 
 terminal.e19 = True
-compile_and_send_program(prog, '/dev/ttyUSB0') # Windows: anstelle von '/dev/ttyUSB0' bitten den Port 'COM1', 'COM2' oder 'COM3', ... angeben
+compile_and_send_program(prog, '/dev/ttyUSB2') # Windows: anstelle von '/dev/ttyUSB0' bitten den Port 'COM1', 'COM2' oder 'COM3', ... angeben

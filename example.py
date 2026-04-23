@@ -1,3 +1,7 @@
+#!/usr/bin/python3
+import FTI
+from FTI_com import compile_and_send_program
+
 prog = FTI.Program()
 
 

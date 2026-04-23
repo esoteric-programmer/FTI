@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import simpledialog
+from tkinter import simpledialog, messagebox
 from abc import ABC, abstractmethod
 from enum import Enum
 import traceback
@@ -15,11 +15,9 @@ class Mode(Enum):
 ## TODO
 ## save Baustein connections and canvas line objects in some datastructure so it can be considered when compiling the program...
 ## forbid duplicate connections
-## compile for active mode
 ## speed up a* search, e.g. by searching on a graph instead of canvas pixels
 ## enhance bounding box // pixels occipied by Baustein
 ## handle impossible connections by disabling bounding box checks
-## implement missing Baustein dialog boxes/properties
 ## make Bausteine editable, moveable and removeable
 ## make connection moveable and deleteable
 ## subprograms
@@ -29,120 +27,231 @@ class Mode(Enum):
 
 
 
-def manhattan(start,target):
-  return abs(start[0]-target[0])+abs(start[1]-target[1])
+CROSSING_PENALTY  = 500   # extra cost per existing connection a new segment would cross
+STUB_PENALTY      = 10000 # extra cost per anchor stub crossed (virtually blocked)
+TURN_PENALTY      = 50    # extra cost for each direction change (prefer straight paths)
+PATH_CLEARANCE    = 4     # minimum pixel distance from other path segments (parallel)
+PROXIMITY_PENALTY = 200   # extra cost per parallel segment that's too close
+
+drawn_path_segments = []  # all [p1, p2] segments of already-drawn connections
+path_anchor_stubs   = []  # short virtual stubs sealing the gap between BB and anchor
 
 
-def get_min_cost(openSet, costs, target):
-  min_cost = float('inf')
-  best_node = -1
-  for idx, p in enumerate(openSet):
-    csts = costs[p[0]][p[1]][0] + manhattan(p, target)
-    #print("est.: "+str(p)+" has costs "+str(csts))
-    if csts < min_cost:
-      min_cost = csts
-      best_node = idx
-  return best_node
+def _hv_segment_blocked(x1, y1, x2, y2, margin=3):
+  """Return True if the horizontal or vertical segment passes through any Baustein BB.
+  Segments that only touch a BB boundary (strict inequality) are allowed."""
+  global bausteine
+  for b in bausteine:
+    bb = b.getBoundingBox()
+    bx1, by1, bx2, by2 = bb[0]-margin, bb[1]-margin, bb[2]+margin, bb[3]+margin
+    if x1 == x2:   # vertical segment at x=x1
+      sy1, sy2 = min(y1, y2), max(y1, y2)
+      if bx1 < x1 < bx2 and sy1 < by2 and sy2 > by1:
+        return True
+    else:           # horizontal segment at y=y1
+      sx1, sx2 = min(x1, x2), max(x1, x2)
+      if by1 < y1 < by2 and sx1 < bx2 and sx2 > bx1:
+        return True
+  return False
 
 
-def reconstruct_path(start, target, costs):
-  #print("FOUND PATH, NOW RECONSTRUCTING!!")
-  path = []
-  cur = target
-  while cur[0] != start[0] or cur[1] != start[1]:
-    path.append(cur)
-    cur = costs[cur[0]][cur[1]][1]
-  path.append(cur)
-  path.reverse()
-  return path
+def _count_hv_crossings(x1, y1, x2, y2, segments):
+  """Count how many segments in the list the new H/V segment crosses."""
+  count = 0
+  for seg in segments:
+    sx1, sy1 = seg[0][0], seg[0][1]
+    sx2, sy2 = seg[1][0], seg[1][1]
+    if x1 == x2:   # new segment is vertical at x=x1
+      if sy1 == sy2:   # existing segment is horizontal at y=sy1
+        ny1, ny2 = min(y1, y2), max(y1, y2)
+        ex1, ex2 = min(sx1, sx2), max(sx1, sx2)
+        if ex1 < x1 < ex2 and ny1 < sy1 < ny2:
+          count += 1
+    else:           # new segment is horizontal at y=y1
+      if sx1 == sx2:   # existing segment is vertical at x=sx1
+        ey1, ey2 = min(sy1, sy2), max(sy1, sy2)
+        nx1, nx2 = min(x1, x2), max(x1, x2)
+        if nx1 < sx1 < nx2 and ey1 < y1 < ey2:
+          count += 1
+  return count
+
+
+def _crossing_cost(x1, y1, x2, y2):
+  """Return extra cost for crossing drawn connections or anchor stubs."""
+  global drawn_path_segments, path_anchor_stubs
+  cost  = _count_hv_crossings(x1, y1, x2, y2, drawn_path_segments) * CROSSING_PENALTY
+  cost += _count_hv_crossings(x1, y1, x2, y2, path_anchor_stubs)   * STUB_PENALTY
+  return cost
+
+
+def _proximity_cost(x1, y1, x2, y2):
+  """Return penalty for running within PATH_CLEARANCE pixels of an existing segment
+  in the parallel direction (avoids paths hugging each other)."""
+  global drawn_path_segments
+  cost = 0
+  for seg in drawn_path_segments:
+    sx1, sy1 = seg[0][0], seg[0][1]
+    sx2, sy2 = seg[1][0], seg[1][1]
+    if x1 == x2 and sx1 == sx2:          # both vertical
+      gap = abs(x1 - sx1)
+      if 0 < gap < PATH_CLEARANCE:
+        ey1, ey2 = min(sy1, sy2), max(sy1, sy2)
+        ny1, ny2 = min(y1,  y2),  max(y1,  y2)
+        if ny1 < ey2 and ny2 > ey1:      # y ranges overlap
+          cost += PROXIMITY_PENALTY
+    elif x1 != x2 and sx1 != sx2:        # both horizontal (sy1==sy2, y1==y2)
+      gap = abs(y1 - sy1)
+      if 0 < gap < PATH_CLEARANCE:
+        ex1, ex2 = min(sx1, sx2), max(sx1, sx2)
+        nx1, nx2 = min(x1,  x2),  max(x1,  x2)
+        if nx1 < ex2 and nx2 > ex1:      # x ranges overlap
+          cost += PROXIMITY_PENALTY
+  return cost
 
 
 def a_star(start, target):
-  global bs, canvas_width, canvas_height
-  if start[0] == target[0] and start[1] == target[1]:
-    return [start]
-  costs = [None]*canvas_width
-  neighbours = [ [0,-1], [0,1], [-1,0], [1,0] ]
-  for i in range(canvas_width):
-    costs[i] = [None]*canvas_height
-    for j in range(canvas_height):
-      costs[i][j] = [float('inf'), None]
-  openSet = [start]
-  costs[ start[0]][ start[1] ] = [0, None]
-  while len(openSet) > 0:
-    #print("openSet = "+str(openSet))
-    cur_idx = get_min_cost(openSet, costs, target)
-    cur_pt = openSet[cur_idx]
-    #print("best node @"+str(cur_idx)+": "+str(cur_pt)+" with min estimated costs of "+str(costs[cur_pt[0]][cur_pt[1]][0] + manhattan(cur_pt, target)))
-    if cur_pt[0] == target[0] and cur_pt[1] == target[1]:
-      return reconstruct_path(start, target, costs)
-    cur_costs = costs[cur_pt[0]][cur_pt[1]][0]
-    #print("current costs="+str(cur_costs))
-    for n in neighbours:
-      new_pt = [ cur_pt[0]+n[0], cur_pt[1] + n[1] ]
-      if new_pt[0] < 0 or new_pt[0] >= canvas_width or new_pt[1] < 0 or new_pt[1] >= canvas_height:
+  """A* on a Hanan grid for orthogonal routing.
+
+  State: (node_id, direction) so that direction changes can be penalised.
+  Direction encoding: 0=left 1=right 2=up 3=down  None=start (no penalty yet).
+  The Manhattan-distance heuristic remains admissible because it never counts
+  turn penalties, so it never over-estimates the true cost."""
+  global bausteine, canvas_width, canvas_height
+
+  start = (int(start[0]), int(start[1]))
+  target = (int(target[0]), int(target[1]))
+
+  if start == target:
+    return [list(start)]
+
+  MARGIN = 3
+  MOVES  = [(-1, 0, 0), (1, 0, 1), (0, -1, 2), (0, 1, 3)]  # dix, diy, dir-id
+
+  # Build Hanan grid: one x- and y-line through each significant coordinate
+  xs = {start[0], target[0]}
+  ys = {start[1], target[1]}
+  for b in bausteine:
+    bb = b.getBoundingBox()
+    xs.add(bb[0] - MARGIN);  xs.add(bb[2] + MARGIN)
+    ys.add(bb[1] - MARGIN);  ys.add(bb[3] + MARGIN)
+  xs = sorted(x for x in xs if 0 <= x < canvas_width)
+  ys = sorted(y for y in ys if 0 <= y < canvas_height)
+
+  xi = {x: i for i, x in enumerate(xs)}
+  yi = {y: i for i, y in enumerate(ys)}
+
+  if start[0] not in xi or start[1] not in yi or target[0] not in xi or target[1] not in yi:
+    return None
+
+  cols = len(ys)
+  rows = len(xs)
+  def nid(ix, iy): return ix * cols + iy
+
+  si = nid(xi[start[0]],  yi[start[1]])
+  ti = nid(xi[target[0]], yi[target[1]])
+
+  # g and prev are keyed by (node_id, direction); None direction = initial state
+  g    = {}
+  prev = {}
+  start_state = (si, None)
+  g[start_state] = 0.0
+  open_set = [start_state]
+
+  def h(node_id):
+    ix, iy = divmod(node_id, cols)
+    return abs(xs[ix] - target[0]) + abs(ys[iy] - target[1])
+
+  while open_set:
+    cs = min(open_set, key=lambda s: g[s] + h(s[0]))
+    open_set.remove(cs)
+    ci, cur_dir = cs
+
+    if ci == ti:
+      path = []
+      state = cs
+      while state is not None:
+        node_id, _ = state
+        ix, iy = divmod(node_id, cols)
+        path.append([xs[ix], ys[iy]])
+        state = prev.get(state)
+      path.reverse()
+      return path
+
+    ix, iy = divmod(ci, cols)
+    for dix, diy, new_dir in MOVES:
+      nix, niy = ix + dix, iy + diy
+      if nix < 0 or nix >= rows or niy < 0 or niy >= cols:
         continue
-      ## check if point is blocked by bounding box; if this is the case: skip it!!
-      skip = False
-      for b in bausteine:
-        bb = b.getBoundingBox()
-        if new_pt[0] >= bb[0] and new_pt[0] < bb[2] and new_pt[1] >= bb[1] and new_pt[1] < bb[3]:
-          #print(str(new_pt)+" lies inside bb ("+str(bb)+")")
-          skip = True
-          break
-      if skip:
+      x1, y1 = xs[ix],  ys[iy]
+      x2, y2 = xs[nix], ys[niy]
+      if _hv_segment_blocked(x1, y1, x2, y2, MARGIN):
         continue
-      #print("checking neighbour "+str(new_pt))
-      if costs[new_pt[0]][new_pt[1]][0] > cur_costs+1:
-        #print("will decrease costs from "+str(costs[new_pt[0]][new_pt[1]][0])+" to "+str(cur_costs+1))
-        costs[new_pt[0]][new_pt[1]] = [ cur_costs+1, cur_pt ]
-        ## append to openSet if not already inside
-        in_list = False
-        for x in openSet:
-          if x[0] == new_pt[0] and x[1] == new_pt[1]:
-            in_list = True
-            #print("... but is already in openSet")
-            break
-        if not in_list:
-          #print("... so we are adding the neighbour to the openSet")
-          openSet.append(new_pt)
-    openSet.pop(cur_idx)
-    #print("all neighbours processed, so "+str(cur_pt)+" has been removed from the openSet")
-  return None
+      turn_cost = TURN_PENALTY if (cur_dir is not None and new_dir != cur_dir) else 0
+      dist = abs(x2 - x1) + abs(y2 - y1)
+      ng   = g[cs] + dist + turn_cost \
+             + _crossing_cost(x1, y1, x2, y2) \
+             + _proximity_cost(x1, y1, x2, y2)
+      ni = nid(nix, niy)
+      ns = (ni, new_dir)
+      if g.get(ns, float('inf')) > ng:
+        g[ns]    = ng
+        prev[ns] = cs
+        if ns not in open_set:
+          open_set.append(ns)
+
+  return None   # no path found
+
 
 def simplifyPath(path):
-  if len(path)<1 or path is None:
+  """Merge consecutive collinear segments (same orientation H or V)."""
+  if path is None or len(path) == 0:
     return []
-  if len(path)<2:
-    return [path[0], path[0]]
-  if len(path)==2:
-    return path
-  ## simplify: find segments without changing directions
-  start = path[0]
-  direction = [path[1][0] - path[0][0], path[1][1] - path[0][1]]
-  idx = 1
-  pathes = []
-  while idx+1 < len(path):
-    new_direction = [path[idx+1][0] - path[idx][0], path[idx+1][1] - path[idx][1]]
-    if new_direction[0] == direction[0] and new_direction[1] == direction[1]:
-      idx = idx+1
-      continue
-    print("old direction: "+str(direction)+", new direction: "+str(new_direction))
-    pathes.append( [start, path[idx]] )
-    start = path[idx]
-    direction = new_direction
-    idx = idx+1
-  pathes.append( [start, path[idx]] )
-  return pathes
+  if len(path) == 1:
+    return [[path[0], path[0]]]
+  segments = []
+  seg_start = path[0]
+  for i in range(1, len(path) - 1):
+    prev_vertical = (path[i][0] == path[i-1][0])
+    next_vertical = (path[i][0] == path[i+1][0])
+    if prev_vertical != next_vertical:   # orientation change → corner
+      segments.append([seg_start, path[i]])
+      seg_start = path[i]
+  segments.append([seg_start, path[-1]])
+  return segments
+
 
 def drawPath(path):
-  global innercanvas
+  global innercanvas, drawn_path_segments, path_anchor_stubs
   pathes = simplifyPath(path)
-  print("simplified: "+str(pathes))
   arrow = 'last'
-  for path in reversed(pathes):
-    innercanvas.create_line(path[0][0],path[0][1],path[1][0],path[1][1], fill='green', width=3, arrow=arrow)
+  for seg in reversed(pathes):
+    innercanvas.create_line(seg[0][0], seg[0][1], seg[1][0], seg[1][1],
+                            fill='green', width=3, arrow=arrow)
     arrow = 'none'
+  drawn_path_segments.extend(pathes)
+  # Seal the gap between each connection point and its Baustein's BB with a virtual
+  # stub.  The stub runs from the anchor point back toward the Baustein (opposite to
+  # the first outgoing segment, and continuing beyond the target anchor in the same
+  # inbound direction), long enough to cover the visual stub + expansion margin gap.
+  STUB_LEN = 5   # covers the ~4 px visual stub plus the 1 px expanded-BB gap
+  if pathes:
+    src     = pathes[0][0]
+    src_dir = [pathes[0][1][0] - src[0], pathes[0][1][1] - src[1]]
+    if src_dir[0] == 0:   # first segment vertical
+      dy = 1 if src_dir[1] > 0 else -1
+      path_anchor_stubs.append([[src[0], src[1] - dy * STUB_LEN], [src[0], src[1]]])
+    else:                 # first segment horizontal
+      dx = 1 if src_dir[0] > 0 else -1
+      path_anchor_stubs.append([[src[0] - dx * STUB_LEN, src[1]], [src[0], src[1]]])
+
+    tgt      = pathes[-1][1]
+    tgt_dir  = [tgt[0] - pathes[-1][0][0], tgt[1] - pathes[-1][0][1]]
+    if tgt_dir[0] == 0:  # last segment vertical
+      dy = 1 if tgt_dir[1] > 0 else -1
+      path_anchor_stubs.append([[tgt[0], tgt[1]], [tgt[0], tgt[1] + dy * STUB_LEN]])
+    else:                # last segment horizontal
+      dx = 1 if tgt_dir[0] > 0 else -1
+      path_anchor_stubs.append([[tgt[0], tgt[1]], [tgt[0] + dx * STUB_LEN, tgt[1]]])
 
 
 
@@ -212,6 +321,12 @@ class Baustein:
     def objects(self):
         pass
 
+    def to_fti(self):
+        raise NotImplementedError(f"{self.__class__.__name__}.to_fti() not implemented")
+
+    def get_fti_slot(self, conn_idx):
+        return 0
+
 
 class StartBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
@@ -229,6 +344,9 @@ class StartBaustein(Baustein):
         return [[0,19,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-10,self.x+70,self.y+15]
+    def to_fti(self):
+        import FTI
+        return FTI.Start()
 
 
 class EndeBaustein(Baustein):
@@ -247,6 +365,8 @@ class EndeBaustein(Baustein):
         return [[0,-19,False]]
     def getBoundingBox(self):
         return [self.x-70,self.y-15,self.x+70,self.y+10]
+    def to_fti(self):
+        return None  # Ende = None in FTI
 
 class BeepBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
@@ -263,6 +383,9 @@ class BeepBaustein(Baustein):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-15,self.x+70,self.y+15]
+    def to_fti(self):
+        import FTI
+        return FTI.Ton()
 
 
 class IncDecBaustein(Baustein):
@@ -299,6 +422,9 @@ class IncBaustein(IncDecBaustein):
         objs = super().objects()
         objs.append([self.canvas.create_text(0, 0, text="INC", font=("Helvetica", 12), fill='black'), 50, 2])
         return objs
+    def to_fti(self):
+        import FTI
+        return FTI.IncVariable(self.var)
 
 
 class DecBaustein(IncDecBaustein):
@@ -308,6 +434,9 @@ class DecBaustein(IncDecBaustein):
         objs = super().objects()
         objs.append([self.canvas.create_text(0, 0, text="DEC", font=("Helvetica", 12), fill='black'), 50, 2])
         return objs
+    def to_fti(self):
+        import FTI
+        return FTI.DecVariable(self.var)
 
 
 class EingangBaustein(Baustein):
@@ -347,6 +476,18 @@ class EingangBaustein(Baustein):
         if self.rightOn == 1:
           self.canvas.itemconfigure(self.elements[5]['element'], text="1")
           self.canvas.itemconfigure(self.elements[6]['element'], text="0")
+    def to_fti(self):
+        import FTI
+        return FTI.Eingang(self.eingang)
+    def get_fti_slot(self, conn_idx):
+        # conn[1]=bottom, conn[2]=right
+        # rightOn==0: bottom=True(slot 0), right=False(slot 1)
+        # rightOn==1: bottom=False(slot 1), right=True(slot 0)
+        if conn_idx == 1:  # bottom
+            return 0 if self.rightOn == 0 else 1
+        elif conn_idx == 2:  # right
+            return 1 if self.rightOn == 0 else 0
+        return 0
 
 
 class FlankeBaustein(Baustein):
@@ -378,12 +519,18 @@ class FlankeBaustein(Baustein):
           pass
         self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
         self.canvas.itemconfigure(self.elements[5]['element'], text="E "+str(self.eingang))
-
+    def to_fti(self):
+        import FTI
+        return FTI.Flanke(self.eingang)
 
 
 class PositionBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.eingang = 0
+        self.countervar = 0
+        self.target_value = None
+        self.decrement = False
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 25, 0, 35],
@@ -405,15 +552,50 @@ class PositionBaustein(Baustein):
         return [[0,-34,False],[0,34,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-30,self.x+70,self.y+30]
-    # TODO: ask INC/DEC, entry number, counter variable and target value
     def onUserCreated(self):
-        pass
+        mode_str = ''
+        while mode_str not in ['inc', 'dec']:
+            r = tk.simpledialog.askstring("Position", "Modus [inc/dec]")
+            if r:
+                mode_str = r.lower()
+        self.decrement = (mode_str == 'dec')
 
+        while self.eingang <= 0 or self.eingang > 26:
+            try:
+                self.eingang = int(tk.simpledialog.askstring("Position", "Eingangsnummer [1-26]"))
+            except:
+                pass
+
+        while self.countervar <= 0 or self.countervar > 99:
+            try:
+                self.countervar = int(tk.simpledialog.askstring("Position", "Zählervariable [1-99]"))
+            except:
+                pass
+
+        while self.target_value is None:
+            try:
+                self.target_value = int(tk.simpledialog.askstring("Position", "Zielwert (Konstante)"))
+            except:
+                pass
+
+        self.canvas.itemconfigure(self.elements[9]['element'], text='DEC' if self.decrement else 'INC')
+        self.canvas.itemconfigure(self.elements[4]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[5]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[6]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[10]['element'], text=f"E {self.eingang}")
+        self.canvas.itemconfigure(self.elements[11]['element'], text=f"VAR {self.countervar}")
+        self.canvas.itemconfigure(self.elements[12]['element'], text=str(self.target_value))
+    def to_fti(self):
+        import FTI
+        return FTI.Position(self.eingang, FTI.constant(self.target_value), self.countervar, self.decrement)
 
 
 class VariableBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.var = 0
+        self.value_type = None   # 'konstante' | 'variable' | 'terminal' | 'analog'
+        self.value = None        # int for konstante/variable, str for terminal/analog
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
@@ -427,14 +609,75 @@ class VariableBaustein(Baustein):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-15,self.x+70,self.y+15]
-    # TODO: ask which variable the value should be assigned to and which value should be assigned
     def onUserCreated(self):
-        pass
+        while self.var <= 0 or self.var > 99:
+            try:
+                self.var = int(tk.simpledialog.askstring("Variable", "Variablennummer [1-99]"))
+            except:
+                pass
+        while self.value_type not in ('konstante', 'variable', 'terminal', 'analog'):
+            r = tk.simpledialog.askstring(
+                "Variable",
+                "Zuzuweisender Wert:\n  1 = Konstante\n  2 = Variable (VAR1..VAR99)\n  3 = Terminal-Eingang (EA/EB/EC/ED)\n  4 = Analog-Eingang (EX/EY)")
+            if r:
+                r = r.strip()
+                if r == '1' or r.lower() == 'konstante':
+                    self.value_type = 'konstante'
+                elif r == '2' or r.lower() == 'variable':
+                    self.value_type = 'variable'
+                elif r == '3' or r.lower().startswith('terminal'):
+                    self.value_type = 'terminal'
+                elif r == '4' or r.lower().startswith('analog'):
+                    self.value_type = 'analog'
+        if self.value_type == 'konstante':
+            while self.value is None:
+                try:
+                    self.value = int(tk.simpledialog.askstring("Variable", "Konstanter Wert"))
+                except:
+                    pass
+            display_val = str(self.value)
+        elif self.value_type == 'variable':
+            while not (isinstance(self.value, int) and 1 <= self.value <= 99):
+                try:
+                    self.value = int(tk.simpledialog.askstring("Variable", "Quell-Variablennummer [1-99]"))
+                except:
+                    pass
+            display_val = f"VAR{self.value}"
+        elif self.value_type == 'terminal':
+            while self.value not in ('EA', 'EB', 'EC', 'ED'):
+                r = tk.simpledialog.askstring("Variable", "Terminal-Eingang [EA / EB / EC / ED]")
+                if r:
+                    self.value = r.upper().strip()
+            display_val = self.value
+        else:  # analog
+            while self.value not in ('EX', 'EY'):
+                r = tk.simpledialog.askstring("Variable", "Analog-Eingang [EX / EY]")
+                if r:
+                    self.value = r.upper().strip()
+            display_val = self.value
+        self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[4]['element'], text=f"VAR {self.var} = {display_val}")
+    def to_fti(self):
+        import FTI
+        if self.value_type == 'konstante':
+            src = FTI.constant(self.value)
+        elif self.value_type == 'variable':
+            src = FTI.variable(self.value)
+        elif self.value_type == 'terminal':
+            src = FTI.terminal(self.value)
+        else:  # analog
+            src = FTI.analog(self.value)
+        return FTI.Variable(self.var, src)
 
 
 class VergleichBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.var = 0
+        self.operator = '='
+        self.compare_type = None   # 'konstante' | 'variable' | 'terminal'
+        self.compare_value = None  # int for konstante/variable, str ('EA'..'ED') for terminal
+        self.rightJ = True         # True: J (condition met) goes right, N goes bottom
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 30, 0, 40],
@@ -451,14 +694,89 @@ class VergleichBaustein(Baustein):
         return [[0,-39,False],[0,39,True],[79,0,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-35,self.x+75,self.y+35]
-    # TODO: ask which variable should be read, which operator should be used, to which value it should be compared and in which case we should go to the right?
     def onUserCreated(self):
-        pass
+        while self.var <= 0 or self.var > 99:
+            try:
+                self.var = int(tk.simpledialog.askstring("Vergleich", "Variablennummer [1-99]"))
+            except:
+                pass
+        while self.operator not in ['=', '>', '<', '>=', '<=']:
+            r = tk.simpledialog.askstring("Vergleich", "Vergleichsoperator [= / > / < / >= / <=]")
+            if r:
+                self.operator = r.strip()
+        while self.compare_type not in ('konstante', 'variable', 'terminal'):
+            r = tk.simpledialog.askstring(
+                "Vergleich",
+                "Vergleichstyp:\n  1 = Konstante\n  2 = Variable (VAR1..VAR99)\n  3 = Terminal-Eingang (EA/EB/EC/ED)")
+            if r:
+                r = r.strip()
+                if r == '1' or r.lower() == 'konstante':
+                    self.compare_type = 'konstante'
+                elif r == '2' or r.lower() == 'variable':
+                    self.compare_type = 'variable'
+                elif r == '3' or r.lower().startswith('terminal'):
+                    self.compare_type = 'terminal'
+        if self.compare_type == 'konstante':
+            while self.compare_value is None:
+                try:
+                    self.compare_value = int(tk.simpledialog.askstring("Vergleich", "Konstanter Vergleichswert"))
+                except:
+                    pass
+            display_val = str(self.compare_value)
+        elif self.compare_type == 'variable':
+            while not (isinstance(self.compare_value, int) and 1 <= self.compare_value <= 99):
+                try:
+                    self.compare_value = int(tk.simpledialog.askstring("Vergleich", "Vergleichs-Variablennummer [1-99]"))
+                except:
+                    pass
+            display_val = f"VAR{self.compare_value}"
+        else:  # terminal
+            while self.compare_value not in ('EA', 'EB', 'EC', 'ED'):
+                r = tk.simpledialog.askstring("Vergleich", "Terminal-Eingang [EA / EB / EC / ED]")
+                if r:
+                    self.compare_value = r.upper().strip()
+            display_val = self.compare_value
+        r = ''
+        while r not in ('J', 'N'):
+            val = tk.simpledialog.askstring("Vergleich", "Verzweigung rechts bei [J/N]")
+            if val:
+                r = val.upper().strip()
+        self.rightJ = (r == 'J')
+        self.canvas.itemconfigure(self.elements[4]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[5]['element'], text='J' if self.rightJ else 'N')
+        self.canvas.itemconfigure(self.elements[6]['element'], text='N' if self.rightJ else 'J')
+        self.canvas.itemconfigure(self.elements[7]['element'],
+                                  text=f"V{self.var} {self.operator} {display_val}")
+    def to_fti(self):
+        import FTI
+        if self.compare_type == 'konstante':
+            target = FTI.constant(self.compare_value)
+        elif self.compare_type == 'variable':
+            target = FTI.variable(self.compare_value)
+        else:  # terminal
+            target = FTI.terminal(self.compare_value)
+        # >= and <= are implemented as their complements (< and >) with J/N swapped
+        fti_op = {'=': '=', '>': '>', '<': '<', '>=': '<', '<=': '>'}[self.operator]
+        return FTI.Vergleich(self.var, target, fti_op)
+    def get_fti_slot(self, conn_idx):
+        # rightJ=True:  right=J(slot 0/on_true),  bottom=N(slot 1/on_false)
+        # rightJ=False: right=N(slot 1/on_false), bottom=J(slot 0/on_true)
+        # >= / <= use complement operator, so true/false are swapped at FTI level
+        flip = self.operator in ('>=', '<=')
+        if conn_idx == 1:   # bottom
+            slot = 1 if self.rightJ else 0
+        elif conn_idx == 2:  # right
+            slot = 0 if self.rightJ else 1
+        else:
+            return 0
+        return (1 - slot) if flip else slot
 
 
 class MotorBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.motor_num = 0
+        self.motor_dir = 'aus'
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
@@ -473,14 +791,31 @@ class MotorBaustein(Baustein):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-15,self.x+70,self.y+15]
-    # TODO: ask which motor should be controlled and in which direction (Off, left, Right)
     def onUserCreated(self):
-        pass
+        while self.motor_num <= 0 or self.motor_num > 8:
+            try:
+                self.motor_num = int(tk.simpledialog.askstring("Motor", "Motornummer [1-8]"))
+            except:
+                pass
+        dir_str = ''
+        while dir_str not in ['links', 'rechts', 'aus']:
+            r = tk.simpledialog.askstring("Motor", "Richtung [links/rechts/aus]")
+            if r:
+                dir_str = r.lower()
+        self.motor_dir = dir_str
+        self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[5]['element'], text=f"M{self.motor_num} {dir_str.upper()}")
+    def to_fti(self):
+        import FTI
+        dir_map = {'links': FTI.Richtung.LINKS, 'rechts': FTI.Richtung.RECHTS, 'aus': FTI.Richtung.AUS}
+        return FTI.Motor(self.motor_num, dir_map[self.motor_dir])
 
 
 class LampeBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.lamp_num = 0
+        self.lamp_on = False
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
@@ -495,14 +830,29 @@ class LampeBaustein(Baustein):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-15,self.x+70,self.y+15]
-    # TODO: ask which lamp should be controlled and should it turned On or Off
     def onUserCreated(self):
-        pass
+        while self.lamp_num <= 0 or self.lamp_num > 8:
+            try:
+                self.lamp_num = int(tk.simpledialog.askstring("Lampe", "Lampennummer [1-8]"))
+            except:
+                pass
+        on_str = ''
+        while on_str not in ['ein', 'aus']:
+            r = tk.simpledialog.askstring("Lampe", "Schalten [ein/aus]")
+            if r:
+                on_str = r.lower()
+        self.lamp_on = (on_str == 'ein')
+        self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[5]['element'], text=f"L{self.lamp_num} {'EIN' if self.lamp_on else 'AUS'}")
+    def to_fti(self):
+        import FTI
+        return FTI.Lampe(self.lamp_num, self.lamp_on)
 
 
 class WarteBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.wait_ms = 0
     def objects(self):
       objs = [
           [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
@@ -517,14 +867,25 @@ class WarteBaustein(Baustein):
         return [[0,-19,False],[0,19,True]]
     def getBoundingBox(self):
         return [self.x-70,self.y-15,self.x+70,self.y+15]
-    # TODO: ask how long time should be waited
     def onUserCreated(self):
-        pass
+        while self.wait_ms <= 0:
+            try:
+                val = tk.simpledialog.askstring("Warte", "Wartezeit in Millisekunden")
+                if val:
+                    self.wait_ms = int(val)
+            except:
+                pass
+        self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[5]['element'], text=f"{self.wait_ms/1000:.1f}s")
+    def to_fti(self):
+        import FTI
+        return FTI.Warte(self.wait_ms)
 
 
 class NotausResetBaustein(Baustein):
     def __init__(self, canvas, x=None, y=None):
         super().__init__(canvas, x, y)
+        self.eingang = 0
     def objects(self):
       objs = [
           [self.canvas.create_rectangle(0, 0, 0, 0, fill='white'), -60, -10, 60, 10],
@@ -536,9 +897,14 @@ class NotausResetBaustein(Baustein):
       return objs
     def getBoundingBox(self):
         return [self.x-70,self.y-10,self.x+70,self.y+10]
-    # TODO: ask which entry should cause the action
     def onUserCreated(self):
-        pass
+        while self.eingang <= 0 or self.eingang > 26:
+            try:
+                self.eingang = int(tk.simpledialog.askstring("Eingang", "Eingangsnummer [1-26]"))
+            except:
+                pass
+        self.canvas.itemconfigure(self.elements[3]['element'], fill='white')
+        self.canvas.itemconfigure(self.elements[4]['element'], text=f"E {self.eingang}")
 
 
 class NotausBaustein(NotausResetBaustein):
@@ -548,6 +914,9 @@ class NotausBaustein(NotausResetBaustein):
         objs = super().objects()
         objs.append([self.canvas.create_text(0, 0, text="NOTAUS", font=("Helvetica", 10), fill='red'), -20, 2])
         return objs
+    def to_fti(self):
+        import FTI
+        return FTI.NotAus(self.eingang)
 
 
 class ResetBaustein(NotausResetBaustein):
@@ -557,6 +926,9 @@ class ResetBaustein(NotausResetBaustein):
         objs = super().objects()
         objs.append([self.canvas.create_text(0, 0, text="RESET", font=("Helvetica", 10), fill='blue'), -20, 2])
         return objs
+    def to_fti(self):
+        import FTI
+        return FTI.Reset(self.eingang)
 
 
 class ItemSelectionDialog(simpledialog.Dialog):
@@ -576,7 +948,7 @@ class ItemSelectionDialog(simpledialog.Dialog):
 
         self.scrollbar = tk.Scrollbar(self.listbox_frame, orient=tk.VERTICAL)
         self.listbox = tk.Listbox(self.listbox_frame, selectmode=tk.SINGLE, yscrollcommand=self.scrollbar.set, height=10)
-        
+
         self.scrollbar.config(command=self.listbox.yview)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -641,6 +1013,7 @@ mode = Mode.NONE
 bs = None
 fixed = True
 bausteine = []
+connections = []  # each entry: [from_baustein, from_conn_idx, to_baustein, to_conn_idx]
 drawFrom = None
 
 def function_rightclick(event):
@@ -677,12 +1050,10 @@ def function_rightclick(event):
               print("searching path from "+drawFrom[0].toString()+", item no "+str(drawFrom[1])+" @("+str(drawFrom[2])+","+str(drawFrom[3])+") to "+b.toString()+", item no "+str(n)+" @("+str(x)+","+str(y)+")")
               innercanvas.configure(cursor="arrow")
               try:
-                #print(str(drawFrom[2:4]))
-                #print(str([x,y]))
                 path = a_star(drawFrom[2:4], [x,y])
                 print("path: "+str(path))
-                # draw it!!
                 drawPath(path)
+                connections.append([drawFrom[0], drawFrom[1], b, n])
               except Exception as e:
                 print(f"Exception: {type(e).__name__}")
                 print(f"Details: {e}")
@@ -695,12 +1066,30 @@ def function_rightclick(event):
       innercanvas.configure(cursor="arrow")
       drawFrom = None
 
+def newProject():
+  global bs, fixed, mode, drawFrom, bausteine, drawn_path_segments, path_anchor_stubs, connections
+  if not messagebox.askyesno("Neu", "Neues Projekt erstellen? Nicht gespeicherte Änderungen gehen verloren."):
+    return
+  function_rightclick(None)
+  for b in bausteine:
+    if b is not None:
+      b.delete()
+  bausteine = []
+  connections = []
+  drawn_path_segments = []
+  path_anchor_stubs = []
+  innercanvas.delete("all")
+  for x in range(0, canvas_width, 50):
+    innercanvas.create_line(x, 0, x, canvas_height, dash=(4, 2), fill="gray")
+  for y in range(0, canvas_height, 50):
+    innercanvas.create_line(0, y, canvas_width, y, dash=(4, 2), fill="gray")
+
 def insertBaustein():
   global bs, fixed, innercanvas, root, mode
-  
+
   ## cancel current insertion (if any)
   function_rightclick(None)
-  
+
   items = ["Beep", "Decrement Variable", "Display", "Eingang", "Ende", "Flanke", "Increment Variable", "Lampe", "Meldung", "Motor", "Notaus", "Position", "Reset", "Start", "Terminal", "Variable", "Vergleich", "Warte"]
   dialog = ItemSelectionDialog(root, "Baustein auswählen", items)
 
@@ -757,8 +1146,6 @@ def callback_motion(event):
     if not fixed and bs:
       x, y = event.x, event.y
       bs.position(x,y)
-    #global innercanvas
-    #print(str(innercanvas.winfo_pointerx()))
 
 def callback(event):
     global bs, fixed, mode
@@ -770,6 +1157,57 @@ def callback(event):
       mode = Mode.NONE
 
 
+def runAktivModus():
+  global bausteine, connections
+  port = tk.simpledialog.askstring("Aktiv-Modus", "Serieller Port:", initialvalue="/dev/ttyUSB0")
+  if not port:
+    return
+  try:
+    import FTI as fti_module
+    from FTI_com import compile_and_send_program
+
+    # Create FTI objects for all GUI Bausteine (except Ende which maps to None)
+    fti_map = {}
+    for b in bausteine:
+      if b is None or isinstance(b, EndeBaustein):
+        continue
+      fti_obj = b.to_fti()
+      if fti_obj is not None:
+        fti_map[id(b)] = fti_obj
+
+    # Link successors based on stored connections
+    for conn in connections:
+      from_b, from_conn_idx, to_b, to_conn_idx = conn
+      fti_from = fti_map.get(id(from_b))
+      if fti_from is None:
+        continue
+      if isinstance(to_b, EndeBaustein):
+        fti_to = None
+      else:
+        fti_to = fti_map.get(id(to_b))
+        if fti_to is None:
+          continue
+      slot = from_b.get_fti_slot(from_conn_idx)
+      fti_from.set_successor(fti_to, slot)
+
+    # Identify root Bausteine: those with no incoming connection in this graph
+    has_incoming = set()
+    for conn in connections:
+      has_incoming.add(id(conn[2]))
+
+    prog = fti_module.Program()
+    for b in bausteine:
+      if b is None or isinstance(b, EndeBaustein):
+        continue
+      if id(b) not in has_incoming:
+        fti_obj = fti_map.get(id(b))
+        if fti_obj is not None:
+          prog.add_baustein(fti_obj)
+
+    compile_and_send_program(prog, port)
+    messagebox.showinfo("Aktiv-Modus", "Programm erfolgreich übertragen!")
+  except Exception as e:
+    messagebox.showerror("Fehler beim Kompilieren", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
 
 
 root = tk.Tk()
@@ -779,7 +1217,7 @@ menu = tk.Menu(root)
 root.config(menu=menu)
 filemenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Datei", menu=filemenu)
-filemenu.add_command(label="Neu...")
+filemenu.add_command(label="Neu...", command=newProject)
 filemenu.add_command(label="Öffnen...")
 filemenu.add_command(label="Speichern")
 filemenu.add_command(label="Speichern unter...")
@@ -791,10 +1229,6 @@ filemenu.add_command(label="Seite drucken")
 filemenu.add_command(label="Projekt drucken")
 filemenu.add_separator()
 filemenu.add_command(label="Beenden", command=root.quit)
-# HISTORY:
-#filemenu.add_separator()
-#filemenu.add_command(label="1 /home/matthias/file1.mdl")
-#filemenu.add_command(label="2 /home/matthias/test3.mdl")
 editmenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Bearbeiten", menu=editmenu)
 editmenu.add_command(label="Hauptprogramm")
@@ -817,7 +1251,7 @@ runmenu.add_command(label="Init")
 runmenu.add_command(label="Start")
 runmenu.add_command(label="Stop")
 runmenu.add_separator()
-runmenu.add_command(label="Aktiv-Modus")
+runmenu.add_command(label="Aktiv-Modus", command=runAktivModus)
 prefmenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Optionen", menu=prefmenu)
 prefmenu.add_command(label="Arbeitsblatt...")
@@ -839,7 +1273,6 @@ wndwmenu.add_command(label="Schließen")
 wndwmenu.add_command(label="Alle schließen")
 wndwmenu.add_separator()
 wndwmenu.add_command(label="1: $Main")
-#wndwmenu.add_command(label="2: ...")
 wndwmenu.add_command(label="Kopieren zur Ablagemappe")
 helpmenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Fenster", menu=helpmenu)
@@ -854,7 +1287,6 @@ helpmenu.add_command(label="Info über...")
 canvas = tk.Canvas(root)
 scrollbar_y = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
 scrollbar_x = tk.Scrollbar(root, orient="horizontal", command=canvas.xview)
-#canvas.grid_propagate(False)
 
 # Place the canvas and scrollbars
 canvas.grid(row=0, column=0, sticky="nsew")
@@ -866,8 +1298,7 @@ root.grid_rowconfigure(0, weight=1)
 root.grid_columnconfigure(0, weight=1)
 
 # Create a frame inside the canvas
-frame = tk.Frame(canvas)  # Frame larger than the window
-#frame.grid_propagate(False)  # Prevent resizing based on content
+frame = tk.Frame(canvas)
 
 # Add the frame to the canvas
 frame_id = canvas.create_window((0, 0), window=frame, anchor="nw")
@@ -899,15 +1330,10 @@ def update_scrollbars(event=None):
 frame.bind("<Configure>", update_scrollbars)
 canvas.bind("<Configure>", update_scrollbars)
 
-# Add some content to the frame (for demonstration)
-#for i in range(20):
-#    tk.Label(frame, text=f"Item {i+1}").grid(row=i, column=0, padx=10, pady=5)
-
 
 canvas_width, canvas_height = 1000, 750  # Size larger than the window
 innercanvas = tk.Canvas(frame, bg="white", width=canvas_width, height=canvas_height)
 innercanvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-#innercanvas.configure(scrollregion=(0, 0, canvas_width, canvas_height))
 
 for x in range(0, canvas_width, 50):  # Vertical dashed lines every 50 pixels
         innercanvas.create_line(x, 0, x, canvas_height, dash=(4, 2), fill="gray")
@@ -931,49 +1357,3 @@ for b in bausteine:
     print(b.toString())
 
 exit(0)
-
-
-
-
-
-
-############ old code
-frame_a = tk.Frame()
-
-greeting = tk.Label(text="Hello, Tkinter")
-greeting.pack()
-
-label = tk.Label(
-    text="Hello, Tkinter",
-    foreground="white",  # Set the text color to white
-    background="black",  # Set the background color to black
-    width=50,
-    height=10
-)
-label.pack()
-button = tk.Button(
-    text="Click me!",
-    width=25,
-    height=5,
-    bg="blue",
-    fg="yellow",
-)
-button.pack()
-button.bind("<Button-1>", handle_click)
-entry = tk.Entry(fg="yellow", bg="blue", width=50)
-entry.pack()
-
-frame_a = tk.Frame()
-frame_b = tk.Frame()
-
-label_a = tk.Label(master=frame_a, text="I'm in Frame A")
-label_a.pack()
-
-label_b = tk.Label(master=frame_b, text="I'm in Frame B")
-label_b.pack()
-
-frame_a.pack()
-frame_b.pack()
-
-window.mainloop()
-#window.destroy()
