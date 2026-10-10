@@ -23,6 +23,7 @@ class SubProgram:
         self.drawn_path_segments = []
         self.path_anchor_stubs = []
         self.connection_lines = []
+        self.text_annotations = []
 
 
 ## TODO
@@ -986,8 +987,9 @@ class DisplayBaustein(Baustein):
 
 
 class SubProgramEingang(Baustein):
-    def __init__(self, canvas, index=1, x=None, y=None):
+    def __init__(self, canvas, index=1, x=None, y=None, label=None):
         self.index = index
+        self.label = label or f"I{index}"
         super().__init__(canvas, x, y)
     def objects(self):
       objs = [
@@ -995,7 +997,7 @@ class SubProgramEingang(Baustein):
           [self.canvas.create_rectangle(0, 0, 0, 0, fill='#e0ffe0'), -60, -10, 60, 10],
           [self.canvas.create_oval(0, 0, 0, 0, fill='#90cc90'), -70, -10, -50, 10],
           [self.canvas.create_oval(0, 0, 0, 0, fill='#90cc90'), 50, -10, 70, 10],
-          [self.canvas.create_text(0, 0, text=f"INP {self.index}", font=("Helvetica", 12), fill='darkgreen'), 0, 2]
+          [self.canvas.create_text(0, 0, text=self.label, font=("Helvetica", 12), fill='darkgreen'), 0, 2]
           ]
       return objs
     def getConnections(self):
@@ -1005,8 +1007,9 @@ class SubProgramEingang(Baustein):
 
 
 class SubProgramAusgang(Baustein):
-    def __init__(self, canvas, index=1, x=None, y=None):
+    def __init__(self, canvas, index=1, x=None, y=None, label=None):
         self.index = index
+        self.label = label or f"O{index}"
         super().__init__(canvas, x, y)
     def objects(self):
       objs = [
@@ -1014,7 +1017,7 @@ class SubProgramAusgang(Baustein):
           [self.canvas.create_rectangle(0, 0, 0, 0, fill='#ffe0e0'), -60, -10, 60, 10],
           [self.canvas.create_oval(0, 0, 0, 0, fill='#cc9090'), -70, -10, -50, 10],
           [self.canvas.create_oval(0, 0, 0, 0, fill='#cc9090'), 50, -10, 70, 10],
-          [self.canvas.create_text(0, 0, text=f"OUTP {self.index}", font=("Helvetica", 12), fill='darkred'), 0, 2]
+          [self.canvas.create_text(0, 0, text=self.label, font=("Helvetica", 12), fill='darkred'), 0, 2]
           ]
       return objs
     def getConnections(self):
@@ -1354,7 +1357,9 @@ def _parse_mdl(filepath):
               pos += nop * 0x14
             if icp != 0 and nic > 0:
               pos += nic * 6
+            da_data = b''
             if dap != 0 and nda > 0:
+              da_data = data[pos:pos + nda * 8]
               pos += nda * 8
             for cp in conn_pins:
               if cp != 0:
@@ -1365,8 +1370,10 @@ def _parse_mdl(filepath):
                     break
 
             elems.append({'type': '', 'x': x, 'y': y, 'type_size': ts,
+                          'nop': nop, 'nic': nic, 'nda': nda,
                           'btp': btp, 'self_ptr': self_ptr,
-                          'pin_targets': pin_targets, 'class_id': class_id})
+                          'pin_targets': pin_targets, 'class_id': class_id,
+                          'da_data': da_data})
             if enp == 0:
               break
 
@@ -1392,11 +1399,15 @@ def _parse_mdl(filepath):
       if tid == 0:
         break
 
+      blobs = []
       for _ in range(3):
         sz = _i32(pos)
         pos += 4
         if sz > 0:
+          blobs.append(data[pos:pos + sz])
           pos += sz
+        else:
+          blobs.append(b'')
 
       sub_ind = _i32(pos)
       pos += 4
@@ -1427,10 +1438,13 @@ def _parse_mdl(filepath):
 
       if entry_idx < len(elems):
         elems[entry_idx]['sub_data'] = sub_data
+        elems[entry_idx]['blobs'] = blobs
       entry_idx += 1
 
   # Pass 3: build result list with parameters extracted from sub_data
   blocks = []
+  entry_count = {}
+  exit_count = {}
   for blk_name, elems in ec_blocks:
     for e in elems:
       tname = e['type']
@@ -1446,10 +1460,48 @@ def _parse_mdl(filepath):
         blocks.append(blk)
         continue
 
+      # Subprogram entry node (cls low byte 0x2D): nop>=1, nic=0
+      if (cid & 0xFF) == 0x2D and e.get('nop', 0) > 0:
+        idx = entry_count.get(blk_name, 0) + 1
+        entry_count[blk_name] = idx
+        da = e.get('da_data', b'')
+        label = da.split(b'\x00')[0].decode('latin-1', errors='replace') if da else ''
+        blk = {'type': 'SUBPROGRAM_EINGANG', 'x': e['x'], 'y': e['y'], 'params': '',
+               'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
+               'pin_targets': e.get('pin_targets', []),
+               'entry_index': idx, 'entry_label': label}
+        blocks.append(blk)
+        continue
+
+      # Subprogram exit node (cls low byte 0x2C): nop=0, nic>=1
+      if (cid & 0xFF) == 0x2C and e.get('nic', 0) > 0:
+        idx = exit_count.get(blk_name, 0) + 1
+        exit_count[blk_name] = idx
+        da = e.get('da_data', b'')
+        label = da.split(b'\x00')[0].decode('latin-1', errors='replace') if da else ''
+        blk = {'type': 'SUBPROGRAM_AUSGANG', 'x': e['x'], 'y': e['y'], 'params': '',
+               'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
+               'pin_targets': e.get('pin_targets', []),
+               'exit_index': idx, 'exit_label': label}
+        blocks.append(blk)
+        continue
+
+      # Text annotations (cls 0x2042/0x2142): free-floating text on canvas
+      if cid in (0x2042, 0x2142) and e.get('nda', 0) > 1:
+        da = e.get('da_data', b'')
+        txt = da[8:].split(b'\x00')[0].decode('latin-1', errors='replace').replace('\r', '\n') if len(da) > 8 else ''
+        if txt.strip():
+          blk = {'type': 'TEXT_ANNOTATION', 'x': e['x'], 'y': e['y'], 'params': txt.strip(),
+                 'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
+                 'pin_targets': []}
+          blocks.append(blk)
+        continue
+
       if not tname or e['type_size'] == 0:
         continue
 
       sub = e.get('sub_data', b'')
+      da = e.get('da_data', b'')
       blk = {'type': tname, 'x': e['x'], 'y': e['y'], 'params': '',
              'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
              'pin_targets': e.get('pin_targets', [])}
@@ -1518,6 +1570,14 @@ def _parse_mdl(filepath):
         if len(sub) > 8:
           eid = sub[4:8].split(b'\x00')[0].decode('ascii', errors='replace').strip()
           blk['params'] = eid
+
+      elif tname == 'MELDUNG':
+        if da:
+          blk['meldung_text'] = da.split(b'\x00')[0].decode('latin-1', errors='replace')
+
+      elif tname == 'DISPLAY':
+        if da:
+          blk['display_text'] = da.split(b'\x00')[0].decode('latin-1', errors='replace')
 
       blocks.append(blk)
 
@@ -1734,15 +1794,17 @@ def _create_baustein(blk):
 
   elif btype == 'MELDUNG':
     bs = MeldungBaustein(innercanvas, bx, by)
-    bs.text = params
+    txt = blk.get('meldung_text', '') or params
+    bs.text = txt
     innercanvas.itemconfigure(bs.elements[2]['element'], fill='#e0e0ff')
-    innercanvas.itemconfigure(bs.elements[3]['element'], text=params if params else 'Meldung')
+    innercanvas.itemconfigure(bs.elements[3]['element'], text=txt if txt else 'Meldung')
 
   elif btype == 'DISPLAY':
     bs = DisplayBaustein(innercanvas, bx, by)
-    bs.text = params
+    txt = blk.get('display_text', '') or params
+    bs.text = txt
     innercanvas.itemconfigure(bs.elements[2]['element'], fill='#ffe0e0')
-    innercanvas.itemconfigure(bs.elements[3]['element'], text=params if params else 'Display')
+    innercanvas.itemconfigure(bs.elements[3]['element'], text=txt if txt else 'Display')
 
   elif btype == 'BAUSTEIN':
     sub_name = blk.get('subprogram_name', '')
@@ -1754,6 +1816,16 @@ def _create_baustein(blk):
     if sub_prog is None and sub_name:
       sub_prog = SubProgram(sub_name)
     bs = BausteinBaustein(innercanvas, sub_prog, bx, by)
+
+  elif btype == 'SUBPROGRAM_EINGANG':
+    idx = blk.get('entry_index', 1)
+    label = blk.get('entry_label', '') or None
+    bs = SubProgramEingang(innercanvas, idx, bx, by, label=label)
+
+  elif btype == 'SUBPROGRAM_AUSGANG':
+    idx = blk.get('exit_index', 1)
+    label = blk.get('exit_label', '') or None
+    bs = SubProgramAusgang(innercanvas, idx, bx, by, label=label)
 
   return bs
 
@@ -1808,8 +1880,10 @@ def openProject():
 
   # Create all SubProgram objects first so BAUSTEIN blocks can find targets
   prog_objs = {}
-  for prog_name in prog_blocks:
-    prog = SubProgram(prog_name)
+  for prog_name, blks in prog_blocks.items():
+    ni = sum(1 for b in blks if b['type'] == 'SUBPROGRAM_EINGANG')
+    no = sum(1 for b in blks if b['type'] == 'SUBPROGRAM_AUSGANG')
+    prog = SubProgram(prog_name, ni, no)
     programs.append(prog)
     prog_objs[prog_name] = prog
 
@@ -1823,6 +1897,15 @@ def openProject():
     for blk in prog_blks:
       if blk['type'] == 'TERMINAL':
         skipped.append(blk['type'])
+        continue
+
+      if blk['type'] == 'TEXT_ANNOTATION':
+        txt = blk.get('params', '')
+        tid = innercanvas.create_text(blk['x'], blk['y'], text=txt,
+                                      font=("Helvetica", 10), fill='#444444',
+                                      anchor='nw')
+        prog_objs[prog_name].text_annotations.append(tid)
+        created += 1
         continue
 
       bs = _create_baustein(blk)
@@ -2146,6 +2229,8 @@ def switch_program(prog):
                 innercanvas.itemconfigure(e['element'], state='hidden')
         for lid in current_program.connection_lines:
             innercanvas.itemconfigure(lid, state='hidden')
+        for tid in current_program.text_annotations:
+            innercanvas.itemconfigure(tid, state='hidden')
     current_program = prog
     bausteine = prog.bausteine
     connections = prog.connections
@@ -2156,6 +2241,8 @@ def switch_program(prog):
             innercanvas.itemconfigure(e['element'], state='normal')
     for lid in prog.connection_lines:
         innercanvas.itemconfigure(lid, state='normal')
+    for tid in prog.text_annotations:
+        innercanvas.itemconfigure(tid, state='normal')
     root.title(f"LLWin Nachbau — {prog.name}")
     update_window_menu()
 
