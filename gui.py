@@ -1,7 +1,8 @@
 import tkinter as tk
-from tkinter import simpledialog, messagebox
+from tkinter import simpledialog, messagebox, filedialog
 from abc import ABC, abstractmethod
 from enum import Enum
+import struct
 import traceback
 
 # Define the global enum
@@ -12,29 +13,45 @@ class Mode(Enum):
   LINK=3
 
 
+class SubProgram:
+    def __init__(self, name, num_inputs=0, num_outputs=0):
+        self.name = name
+        self.num_inputs = num_inputs
+        self.num_outputs = num_outputs
+        self.bausteine = []
+        self.connections = []
+        self.drawn_path_segments = []
+        self.path_anchor_stubs = []
+        self.connection_lines = []
+
+
 ## TODO
-## save Baustein connections and canvas line objects in some datastructure so it can be considered when compiling the program...
 ## forbid duplicate connections
-## speed up a* search, e.g. by searching on a graph instead of canvas pixels
-## enhance bounding box // pixels occipied by Baustein
-## handle impossible connections by disabling bounding box checks
 ## make Bausteine editable, moveable and removeable
 ## make connection moveable and deleteable
-## subprograms
-## implement missing Baustein classes: Display, Meldung, Terminal
-## save project, open project (compatible to LLWin 2.1 file format??)
 ## passive mode
+##
+## --- Future work for LLWin 2.1 MDL compatibility ---
+## missing Baustein classes:
+##   Display  — sets DW109/DW110 (terminal display), implemented as &SVAR
+##   Meldung  — shows a text string, uses &T2D command
+##   Terminal — hardware terminal I/O block
+## text comments: LLWin lets users place free-text annotations on the
+##   canvas (e.g. "Sortierband", "40 Schritte"). Stored in MDL as their
+##   own records with position and string content, no connections.
+## save/open project in LLWin 2.1 MDL format (see reverse_mdl_format.txt)
 
 
 
 CROSSING_PENALTY  = 500   # extra cost per existing connection a new segment would cross
 STUB_PENALTY      = 10000 # extra cost per anchor stub crossed (virtually blocked)
-TURN_PENALTY      = 50    # extra cost for each direction change (prefer straight paths)
 PATH_CLEARANCE    = 4     # minimum pixel distance from other path segments (parallel)
 PROXIMITY_PENALTY = 200   # extra cost per parallel segment that's too close
 
-drawn_path_segments = []  # all [p1, p2] segments of already-drawn connections
-path_anchor_stubs   = []  # short virtual stubs sealing the gap between BB and anchor
+programs = []
+current_program = None
+drawn_path_segments = []  # aliased to current_program.drawn_path_segments by switch_program
+path_anchor_stubs   = []  # aliased to current_program.path_anchor_stubs by switch_program
 
 
 def _hv_segment_blocked(x1, y1, x2, y2, margin=3):
@@ -109,97 +126,97 @@ def _proximity_cost(x1, y1, x2, y2):
   return cost
 
 
-def a_star(start, target):
-  """A* on a Hanan grid for orthogonal routing.
+def simple_route(start, target):
+  """Simple geometric routing matching LLWin 2.1 behavior.
 
-  State: (node_id, direction) so that direction changes can be penalised.
-  Direction encoding: 0=left 1=right 2=up 3=down  None=start (no penalty yet).
-  The Manhattan-distance heuristic remains admissible because it never counts
-  turn penalties, so it never over-estimates the true cost."""
-  global bausteine, canvas_width, canvas_height
+  Tries 0-bend (straight), 1-bend (L-shape), 2-bend (Z-shape),
+  then falls back to a direct diagonal line."""
+  global bausteine
 
-  start = (int(start[0]), int(start[1]))
-  target = (int(target[0]), int(target[1]))
+  sx, sy = int(start[0]), int(start[1])
+  tx, ty = int(target[0]), int(target[1])
 
-  if start == target:
-    return [list(start)]
+  if sx == tx and sy == ty:
+    return [[sx, sy]]
 
   MARGIN = 3
-  MOVES  = [(-1, 0, 0), (1, 0, 1), (0, -1, 2), (0, 1, 3)]  # dix, diy, dir-id
+  GRID = 50
 
-  # Build Hanan grid: one x- and y-line through each significant coordinate
-  xs = {start[0], target[0]}
-  ys = {start[1], target[1]}
+  def seg_cost(x1, y1, x2, y2):
+    return _crossing_cost(x1, y1, x2, y2) + _proximity_cost(x1, y1, x2, y2)
+
+  def seg_ok(x1, y1, x2, y2):
+    return not _hv_segment_blocked(x1, y1, x2, y2, MARGIN)
+
+  # 0-bend: straight H or V line
+  if (sx == tx or sy == ty) and seg_ok(sx, sy, tx, ty):
+    return [[sx, sy], [tx, ty]]
+
+  # 1-bend: L-shape (two options)
+  l_options = []
+  # Option A: vertical then horizontal
+  if seg_ok(sx, sy, sx, ty) and seg_ok(sx, ty, tx, ty):
+    cost = seg_cost(sx, sy, sx, ty) + seg_cost(sx, ty, tx, ty)
+    l_options.append((cost, [[sx, sy], [sx, ty], [tx, ty]]))
+  # Option B: horizontal then vertical
+  if seg_ok(sx, sy, tx, sy) and seg_ok(tx, sy, tx, ty):
+    cost = seg_cost(sx, sy, tx, sy) + seg_cost(tx, sy, tx, ty)
+    l_options.append((cost, [[sx, sy], [tx, sy], [tx, ty]]))
+
+  if l_options:
+    l_options.sort(key=lambda x: x[0])
+    if l_options[0][0] == 0:
+      return l_options[0][1]
+
+  # 2-bend: Z-shape — collect candidate midpoints
+  mid_candidates_y = set()
+  mid_candidates_x = set()
+  mid_y = (sy + ty) // 2
+  mid_x = (sx + tx) // 2
+  mid_candidates_y.add(mid_y)
+  mid_candidates_x.add(mid_x)
+  mid_candidates_y.add(round(mid_y / GRID) * GRID)
+  mid_candidates_x.add(round(mid_x / GRID) * GRID)
+  for g_val in range(0, 1500, GRID):
+    if min(sy, ty) - GRID <= g_val <= max(sy, ty) + GRID:
+      mid_candidates_y.add(g_val)
+    if min(sx, tx) - GRID <= g_val <= max(sx, tx) + GRID:
+      mid_candidates_x.add(g_val)
   for b in bausteine:
     bb = b.getBoundingBox()
-    xs.add(bb[0] - MARGIN);  xs.add(bb[2] + MARGIN)
-    ys.add(bb[1] - MARGIN);  ys.add(bb[3] + MARGIN)
-  xs = sorted(x for x in xs if 0 <= x < canvas_width)
-  ys = sorted(y for y in ys if 0 <= y < canvas_height)
+    mid_candidates_y.add(bb[1] - MARGIN - 1)
+    mid_candidates_y.add(bb[3] + MARGIN + 1)
+    mid_candidates_x.add(bb[0] - MARGIN - 1)
+    mid_candidates_x.add(bb[2] + MARGIN + 1)
 
-  xi = {x: i for i, x in enumerate(xs)}
-  yi = {y: i for i, y in enumerate(ys)}
+  z_best = None
+  z_best_cost = float('inf')
 
-  if start[0] not in xi or start[1] not in yi or target[0] not in xi or target[1] not in yi:
-    return None
+  # Z type 1: V-H-V (vertical, horizontal, vertical)
+  for my in mid_candidates_y:
+    if seg_ok(sx, sy, sx, my) and seg_ok(sx, my, tx, my) and seg_ok(tx, my, tx, ty):
+      cost = seg_cost(sx, sy, sx, my) + seg_cost(sx, my, tx, my) + seg_cost(tx, my, tx, ty)
+      if cost < z_best_cost:
+        z_best_cost = cost
+        z_best = [[sx, sy], [sx, my], [tx, my], [tx, ty]]
 
-  cols = len(ys)
-  rows = len(xs)
-  def nid(ix, iy): return ix * cols + iy
+  # Z type 2: H-V-H (horizontal, vertical, horizontal)
+  for mx in mid_candidates_x:
+    if seg_ok(sx, sy, mx, sy) and seg_ok(mx, sy, mx, ty) and seg_ok(mx, ty, tx, ty):
+      cost = seg_cost(sx, sy, mx, sy) + seg_cost(mx, sy, mx, ty) + seg_cost(mx, ty, tx, ty)
+      if cost < z_best_cost:
+        z_best_cost = cost
+        z_best = [[sx, sy], [mx, sy], [mx, ty], [tx, ty]]
 
-  si = nid(xi[start[0]],  yi[start[1]])
-  ti = nid(xi[target[0]], yi[target[1]])
+  if z_best:
+    return z_best
 
-  # g and prev are keyed by (node_id, direction); None direction = initial state
-  g    = {}
-  prev = {}
-  start_state = (si, None)
-  g[start_state] = 0.0
-  open_set = [start_state]
+  # Prefer L-shape with crossings over diagonal
+  if l_options:
+    return l_options[0][1]
 
-  def h(node_id):
-    ix, iy = divmod(node_id, cols)
-    return abs(xs[ix] - target[0]) + abs(ys[iy] - target[1])
-
-  while open_set:
-    cs = min(open_set, key=lambda s: g[s] + h(s[0]))
-    open_set.remove(cs)
-    ci, cur_dir = cs
-
-    if ci == ti:
-      path = []
-      state = cs
-      while state is not None:
-        node_id, _ = state
-        ix, iy = divmod(node_id, cols)
-        path.append([xs[ix], ys[iy]])
-        state = prev.get(state)
-      path.reverse()
-      return path
-
-    ix, iy = divmod(ci, cols)
-    for dix, diy, new_dir in MOVES:
-      nix, niy = ix + dix, iy + diy
-      if nix < 0 or nix >= rows or niy < 0 or niy >= cols:
-        continue
-      x1, y1 = xs[ix],  ys[iy]
-      x2, y2 = xs[nix], ys[niy]
-      if _hv_segment_blocked(x1, y1, x2, y2, MARGIN):
-        continue
-      turn_cost = TURN_PENALTY if (cur_dir is not None and new_dir != cur_dir) else 0
-      dist = abs(x2 - x1) + abs(y2 - y1)
-      ng   = g[cs] + dist + turn_cost \
-             + _crossing_cost(x1, y1, x2, y2) \
-             + _proximity_cost(x1, y1, x2, y2)
-      ni = nid(nix, niy)
-      ns = (ni, new_dir)
-      if g.get(ns, float('inf')) > ng:
-        g[ns]    = ng
-        prev[ns] = cs
-        if ns not in open_set:
-          open_set.append(ns)
-
-  return None   # no path found
+  # Diagonal fallback
+  return [[sx, sy], [tx, ty]]
 
 
 def simplifyPath(path):
@@ -221,12 +238,13 @@ def simplifyPath(path):
 
 
 def drawPath(path):
-  global innercanvas, drawn_path_segments, path_anchor_stubs
+  global innercanvas, drawn_path_segments, path_anchor_stubs, current_program
   pathes = simplifyPath(path)
   arrow = 'last'
   for seg in reversed(pathes):
-    innercanvas.create_line(seg[0][0], seg[0][1], seg[1][0], seg[1][1],
-                            fill='green', width=3, arrow=arrow)
+    lid = innercanvas.create_line(seg[0][0], seg[0][1], seg[1][0], seg[1][1],
+                                  fill='green', width=3, arrow=arrow)
+    current_program.connection_lines.append(lid)
     arrow = 'none'
   drawn_path_segments.extend(pathes)
   # Seal the gap between each connection point and its Baustein's BB with a virtual
@@ -931,6 +949,155 @@ class ResetBaustein(NotausResetBaustein):
         return FTI.Reset(self.eingang)
 
 
+class MeldungBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+        self.text = ''
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
+          [self.canvas.create_text(0, 0, text="", font=("Helvetica", 8), fill='black'), 0, 2],
+          ]
+      return objs
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
+    def getBoundingBox(self):
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
+
+
+class DisplayBaustein(Baustein):
+    def __init__(self, canvas, x=None, y=None):
+        super().__init__(canvas, x, y)
+        self.text = ''
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill='white', outline='black'), -60, -10, 70, -10, 60, 10, -70, 10],
+          [self.canvas.create_text(0, 0, text="", font=("Helvetica", 8), fill='black'), 0, 2],
+          ]
+      return objs
+    def getConnections(self):
+        return [[0,-19,False],[0,19,True]]
+    def getBoundingBox(self):
+        return [self.x-70,self.y-15,self.x+70,self.y+15]
+
+
+class SubProgramEingang(Baustein):
+    def __init__(self, canvas, index=1, x=None, y=None):
+        self.index = index
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, 10, 0, 20],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='#e0ffe0'), -60, -10, 60, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='#90cc90'), -70, -10, -50, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='#90cc90'), 50, -10, 70, 10],
+          [self.canvas.create_text(0, 0, text=f"INP {self.index}", font=("Helvetica", 12), fill='darkgreen'), 0, 2]
+          ]
+      return objs
+    def getConnections(self):
+        return [[0,19,True]]
+    def getBoundingBox(self):
+        return [self.x-70,self.y-10,self.x+70,self.y+15]
+
+
+class SubProgramAusgang(Baustein):
+    def __init__(self, canvas, index=1, x=None, y=None):
+        self.index = index
+        super().__init__(canvas, x, y)
+    def objects(self):
+      objs = [
+          [self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -10, 0, -20],
+          [self.canvas.create_rectangle(0, 0, 0, 0, fill='#ffe0e0'), -60, -10, 60, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='#cc9090'), -70, -10, -50, 10],
+          [self.canvas.create_oval(0, 0, 0, 0, fill='#cc9090'), 50, -10, 70, 10],
+          [self.canvas.create_text(0, 0, text=f"OUTP {self.index}", font=("Helvetica", 12), fill='darkred'), 0, 2]
+          ]
+      return objs
+    def getConnections(self):
+        return [[0,-19,False]]
+    def getBoundingBox(self):
+        return [self.x-70,self.y-15,self.x+70,self.y+10]
+
+
+class BausteinBaustein(Baustein):
+    def __init__(self, canvas, subprogram=None, x=None, y=None):
+        self.subprogram = subprogram
+        super().__init__(canvas, x, y)
+    def _io_counts(self):
+        if self.subprogram:
+            return self.subprogram.num_inputs, self.subprogram.num_outputs
+        return 1, 1
+    def _half_height(self):
+        ni, no = self._io_counts()
+        return max(10, 10 + max(ni - 1, no - 1) * 15)
+    def objects(self):
+        ni, no = self._io_counts()
+        hh = self._half_height()
+        name = self.subprogram.name if self.subprogram else "UP?"
+        objs = []
+        objs.append([self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, -hh, 0, -(hh+10)])
+        for i in range(1, ni):
+            y = -hh + 10 + (i-1) * 30
+            objs.append([self.canvas.create_line(0,0,0,0, fill='green', width=3), -70, y, -80, y])
+        objs.append([self.canvas.create_line(0,0,0,0, fill='green', width=3), 0, hh, 0, hh+10])
+        for i in range(1, no):
+            y = -hh + 10 + (i-1) * 30
+            objs.append([self.canvas.create_line(0,0,0,0, fill='green', width=3), 70, y, 80, y])
+        objs.append([self.canvas.create_polygon(0,0,0,0,0,0,0,0, fill='#ffffcc', outline='black'),
+                     -60, -hh, 70, -hh, 60, hh, -70, hh])
+        objs.append([self.canvas.create_text(0,0, text=name, font=("Helvetica", 12), fill='black'), 0, 2])
+        return objs
+    def getConnections(self):
+        ni, no = self._io_counts()
+        hh = self._half_height()
+        conns = []
+        conns.append([0, -(hh+9), False])
+        for i in range(1, ni):
+            conns.append([-79, -hh + 10 + (i-1) * 30, False])
+        conns.append([0, hh+9, True])
+        for i in range(1, no):
+            conns.append([79, -hh + 10 + (i-1) * 30, True])
+        return conns
+    def getBoundingBox(self):
+        ni, no = self._io_counts()
+        hh = self._half_height()
+        left = -75 if ni > 1 else -70
+        right = 75 if no > 1 else 70
+        return [self.x+left, self.y-(hh+5), self.x+right, self.y+(hh+5)]
+    def toString(self):
+        name = self.subprogram.name if self.subprogram else "?"
+        return f"Unterprogramm {name} at ({self.x};{self.y})"
+
+
+class SubProgramSelectionDialog(simpledialog.Dialog):
+    def __init__(self, parent, sub_programs):
+        self.sub_programs = sub_programs
+        super().__init__(parent, "Unterprogramm")
+    def body(self, master):
+        tk.Label(master, text="Unterprogramm wählen oder neu erstellen:").pack(pady=(5,2))
+        self.listbox = tk.Listbox(master, selectmode=tk.SINGLE,
+                                  height=min(10, len(self.sub_programs) + 2), width=35)
+        self.listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.listbox.insert(tk.END, "Neu erstellen...")
+        for prog in self.sub_programs:
+            self.listbox.insert(tk.END, f"{prog.name}  ({prog.num_inputs} Ein / {prog.num_outputs} Aus)")
+        self.listbox.selection_set(0)
+        return self.listbox
+    def apply(self):
+        sel = self.listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx == 0:
+            self.result = 'new'
+        else:
+            self.result = self.sub_programs[idx - 1]
+
+
 class ItemSelectionDialog(simpledialog.Dialog):
     def __init__(self, parent, title, items):
         self.items = items
@@ -1001,6 +1168,8 @@ class ItemSelectionDialog(simpledialog.Dialog):
               NotausBaustein(self.canvas, 100, 50)
             elif self.selected_item == "Reset":
               ResetBaustein(self.canvas, 100, 50)
+            elif self.selected_item == "Unterprogramm":
+              BausteinBaustein(self.canvas, None, 100, 50)
             else:
               self.canvas.create_text(100, 50, text=self.selected_item, font=("Arial", 14))
 
@@ -1050,7 +1219,7 @@ def function_rightclick(event):
               print("searching path from "+drawFrom[0].toString()+", item no "+str(drawFrom[1])+" @("+str(drawFrom[2])+","+str(drawFrom[3])+") to "+b.toString()+", item no "+str(n)+" @("+str(x)+","+str(y)+")")
               innercanvas.configure(cursor="arrow")
               try:
-                path = a_star(drawFrom[2:4], [x,y])
+                path = simple_route(drawFrom[2:4], [x,y])
                 print("path: "+str(path))
                 drawPath(path)
                 connections.append([drawFrom[0], drawFrom[1], b, n])
@@ -1066,23 +1235,696 @@ def function_rightclick(event):
       innercanvas.configure(cursor="arrow")
       drawFrom = None
 
-def newProject():
-  global bs, fixed, mode, drawFrom, bausteine, drawn_path_segments, path_anchor_stubs, connections
-  if not messagebox.askyesno("Neu", "Neues Projekt erstellen? Nicht gespeicherte Änderungen gehen verloren."):
-    return
-  function_rightclick(None)
-  for b in bausteine:
-    if b is not None:
-      b.delete()
-  bausteine = []
-  connections = []
-  drawn_path_segments = []
-  path_anchor_stubs = []
-  innercanvas.delete("all")
+def redraw_grid():
   for x in range(0, canvas_width, 50):
     innercanvas.create_line(x, 0, x, canvas_height, dash=(4, 2), fill="gray")
   for y in range(0, canvas_height, 50):
     innercanvas.create_line(0, y, canvas_width, y, dash=(4, 2), fill="gray")
+
+def newProject():
+  global programs
+  if not messagebox.askyesno("Neu", "Neues Projekt erstellen? Nicht gespeicherte Änderungen gehen verloren."):
+    return
+  function_rightclick(None)
+  for prog in programs:
+    for b in prog.bausteine:
+      if b is not None:
+        b.delete()
+  innercanvas.delete("all")
+  redraw_grid()
+  programs.clear()
+  main_prog = SubProgram("$Main")
+  programs.append(main_prog)
+  switch_program(main_prog)
+
+
+def _parse_mdl(filepath):
+  """Parse an LLWin 2.1 MDL file and return a list of block dicts.
+
+  Uses struct-based parsing of the MDL binary format:
+  - Program headers (0x18 bytes, linked list)
+  - 0xEC blocks with element linked lists (0x44 bytes each)
+  - 0x70 block type definitions (BAUSTEIN catalog)
+  - Connection data sections (parameters in sub_data)
+
+  Element type is identified via block_type_ptr (offset 0x20) → Block70 self_ptr.
+  Position is at offset 0x06 (x) and 0x08 (y) in the element struct.
+  """
+  with open(filepath, 'rb') as f:
+    data = f.read()
+
+  def _u16(o): return struct.unpack_from('<H', data, o)[0]
+  def _u32(o): return struct.unpack_from('<I', data, o)[0]
+  def _i32(o): return struct.unpack_from('<i', data, o)[0]
+  def _str(o, n):
+    end = data.find(b'\x00', o, o + n)
+    if end < 0: end = o + n
+    return data[o:end].rstrip(b' ').decode('ascii', errors='replace')
+
+  block70_map = {}   # self_ptr → type name
+  ec_self_map = {}   # 0xEC block self_ptr → block_name (for subprogram call resolution)
+  ec_blocks = []     # list of (block_name, [elem_dicts])
+  pos = 0
+
+  # Pass 1: walk program headers, parse blocks and elements
+  while pos + 0x18 <= len(data):
+    next_ptr = _u32(pos)
+    flags = _u16(pos + 16)
+    blp = _u32(pos + 20)
+    is_main = (flags & 1) != 0
+    pos += 0x18
+
+    if is_main:
+      var_sz = _u32(pos + 12)
+      pos += 0x1C
+      if var_sz > 0:
+        pos += var_sz
+      if blp != 0:
+        while pos + 0x70 <= len(data):
+          bname = _str(pos + 4, 16)
+          sp = _u32(pos + 0x6C)
+          block70_map[sp] = bname
+          np = _u32(pos)
+          pos += 0x70
+          if np == 0:
+            break
+    else:
+      while pos + 0xEC <= len(data):
+        blk_name = _str(pos + 4, 16)
+        nout = _u16(pos + 0x18)
+        ninp = _u16(pos + 0x1A)
+        ep = _u32(pos + 0x1C)
+        ec_sp = _u32(pos + 0x20)
+        otp = _u32(pos + 0x30)
+        inp = _u32(pos + 0x34)
+        np = _u32(pos)
+        if ec_sp != 0:
+          ec_self_map[ec_sp] = blk_name
+        pos += 0xEC
+
+        if otp != 0 and nout > 0:
+          pos += nout * 6
+        if inp != 0 and ninp > 0:
+          pos += ninp * 6
+
+        elems = []
+        if ep != 0:
+          while pos + 0x44 <= len(data):
+            enp = _u32(pos)
+            class_id = _u16(pos + 0x04)
+            x = _u16(pos + 0x06)
+            y = _u16(pos + 0x08)
+            nop = _u16(pos + 0x0A)
+            nic = _u16(pos + 0x0C)
+            nda = _u16(pos + 0x0E)
+            ts = _u16(pos + 0x10)
+            opp = _u32(pos + 0x14)
+            icp = _u32(pos + 0x18)
+            dap = _u32(pos + 0x1C)
+            btp = _u32(pos + 0x20)
+            self_ptr = _u32(pos + 0x2C)
+            pos += 0x44
+
+            pin_targets = []
+            conn_pins = []
+            if opp != 0 and nop > 0:
+              for pi in range(nop):
+                pin_targets.append(_u32(pos + pi * 0x14))
+                conn_pins.append(_u32(pos + pi * 0x14 + 0x0C))
+              pos += nop * 0x14
+            if icp != 0 and nic > 0:
+              pos += nic * 6
+            if dap != 0 and nda > 0:
+              pos += nda * 8
+            for cp in conn_pins:
+              if cp != 0:
+                while pos + 8 <= len(data):
+                  cn = _u32(pos)
+                  pos += 8
+                  if cn == 0:
+                    break
+
+            elems.append({'type': '', 'x': x, 'y': y, 'type_size': ts,
+                          'btp': btp, 'self_ptr': self_ptr,
+                          'pin_targets': pin_targets, 'class_id': class_id})
+            if enp == 0:
+              break
+
+        ec_blocks.append((blk_name, elems))
+        if np == 0:
+          break
+
+    if next_ptr == 0:
+      break
+
+  # Resolve element types now that block70_map is populated
+  for blk_name, elems in ec_blocks:
+    for e in elems:
+      e['type'] = block70_map.get(e['btp'], '')
+
+  # Pass 2: parse connection data sections (one per 0xEC block)
+  # Extract parameters from sub_data for each element
+  for blk_name, elems in ec_blocks:
+    entry_idx = 0
+    while pos + 2 <= len(data):
+      tid = _u16(pos)
+      pos += 2
+      if tid == 0:
+        break
+
+      for _ in range(3):
+        sz = _i32(pos)
+        pos += 4
+        if sz > 0:
+          pos += sz
+
+      sub_ind = _i32(pos)
+      pos += 4
+      sub_data = b''
+      if sub_ind == -1:
+        def _skip_recursive():
+          nonlocal pos
+          while pos + 2 <= len(data):
+            t = _u16(pos)
+            pos += 2
+            if t == 0:
+              break
+            for _ in range(3):
+              s = _i32(pos)
+              pos += 4
+              if s > 0:
+                pos += s
+            si = _i32(pos)
+            pos += 4
+            if si == -1:
+              _skip_recursive()
+            elif si > 0:
+              pos += si
+        _skip_recursive()
+      elif sub_ind > 0:
+        sub_data = data[pos:pos + sub_ind]
+        pos += sub_ind
+
+      if entry_idx < len(elems):
+        elems[entry_idx]['sub_data'] = sub_data
+      entry_idx += 1
+
+  # Pass 3: build result list with parameters extracted from sub_data
+  blocks = []
+  for blk_name, elems in ec_blocks:
+    for e in elems:
+      tname = e['type']
+      cid = e.get('class_id', 0)
+
+      # Subprogram call (cls=0x2100) or graphic subprogram ref (cls=0x2700 with nop>0)
+      if e['type_size'] == 0 and cid in (0x2100, 0x2700) and len(e.get('pin_targets', [])) > 0:
+        target_name = ec_self_map.get(e['btp'], '')
+        blk = {'type': 'BAUSTEIN', 'x': e['x'], 'y': e['y'], 'params': '',
+               'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
+               'pin_targets': e.get('pin_targets', []),
+               'subprogram_name': target_name}
+        blocks.append(blk)
+        continue
+
+      if not tname or e['type_size'] == 0:
+        continue
+
+      sub = e.get('sub_data', b'')
+      blk = {'type': tname, 'x': e['x'], 'y': e['y'], 'params': '',
+             'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
+             'pin_targets': e.get('pin_targets', [])}
+
+      if tname == 'MOTOR' or tname == 'LAMPE':
+        if len(sub) > 4:
+          num_byte = sub[4]
+          if 0x31 <= num_byte <= 0x38:
+            blk['num'] = num_byte - 0x30
+        if len(sub) >= 448:
+          dir_bytes = sub[440:448].split(b'\x00')[0]
+          blk['direction'] = dir_bytes.decode('ascii', errors='replace').strip()
+          d = blk.get('direction', '')
+          if d in ('RECHTS', 'LINKS'):
+            blk['type'] = 'MOTOR'
+          elif d == 'EIN':
+            blk['type'] = 'LAMPE'
+          tname = blk['type']
+
+      elif tname == 'WARTE':
+        if len(sub) >= 12:
+          blk['wait_seconds'] = struct.unpack_from('<d', sub, 4)[0]
+
+      elif tname == 'EINGANG':
+        if len(sub) >= 424:
+          eid = sub[416:424].split(b'\x00')[0].decode('ascii', errors='replace').strip()
+          for ch in eid:
+            if ch.isdigit():
+              blk['eingang_num'] = int(ch)
+              break
+        elif len(sub) > 8:
+          eid = sub[4:8].split(b'\x00')[0].decode('ascii', errors='replace').strip()
+          for ch in eid:
+            if ch.isdigit():
+              blk['eingang_num'] = int(ch)
+              break
+        if len(sub) >= 432:
+          ron_byte = sub[428]
+          if ron_byte in (0x30, 0x31):
+            blk['right_on'] = ron_byte - 0x30
+
+      elif tname == 'FLANKE':
+        if len(sub) > 8:
+          eid = sub[4:8].split(b'\x00')[0].decode('ascii', errors='replace').strip()
+          for ch in eid:
+            if ch.isdigit():
+              blk['eingang_num'] = int(ch)
+              break
+
+      elif tname == 'VARIABLE':
+        if len(sub) > 8:
+          ps = sub[4:20].split(b'\x00')[0].decode('ascii', errors='replace').strip()
+          blk['params'] = ps
+
+      elif tname == 'VERGLEICH':
+        if len(sub) > 8:
+          ps = sub[4:20].split(b'\x00')[0].decode('ascii', errors='replace').strip()
+          blk['params'] = ps
+
+      elif tname in ('INCVARIABLE', 'DECVARIABLE'):
+        if len(sub) > 8:
+          ps = sub[4:20].split(b'\x00')[0].decode('ascii', errors='replace').strip()
+          blk['params'] = ps
+
+      elif tname in ('NOTAUS', 'RESET'):
+        if len(sub) > 8:
+          eid = sub[4:8].split(b'\x00')[0].decode('ascii', errors='replace').strip()
+          blk['params'] = eid
+
+      blocks.append(blk)
+
+  return blocks
+
+
+def _parse_motor_params(param_str):
+  """Parse Motor param string like 'M1 RECHTS' or 'RECHTS' → (motor_num, direction)."""
+  parts = param_str.upper().split()
+  motor_num = 1
+  direction = 'aus'
+  for p in parts:
+    if p.startswith('M') and len(p) >= 2 and p[1:].isdigit():
+      motor_num = int(p[1:])
+    elif p in ('LINKS', 'RECHTS', 'AUS', 'EIN'):
+      direction = p.lower()
+  return motor_num, direction
+
+
+def _parse_lampe_params(param_str):
+  """Parse Lampe param string → (lamp_num, on)."""
+  parts = param_str.upper().split()
+  lamp_num = 1
+  on = False
+  for p in parts:
+    if p.startswith('L') and len(p) >= 2 and p[1:].isdigit():
+      lamp_num = int(p[1:])
+    elif p == 'EIN':
+      on = True
+    elif p == 'AUS':
+      on = False
+  return lamp_num, on
+
+
+def _parse_eingang_num(param_str):
+  """Parse 'E  1' or 'E 12' → integer."""
+  for part in param_str.split():
+    if part.isdigit():
+      return int(part)
+  return 1
+
+
+def _parse_variable_params(param_str):
+  """Parse 'VAR  1 = 0' or 'VAR 1=EX' → (var_num, value_type, value)."""
+  var_num = 1
+  value_type = 'konstante'
+  value = 0
+  parts = param_str.replace('=', ' = ').split()
+  for i, p in enumerate(parts):
+    if p.upper().startswith('VAR') and i + 1 < len(parts) and parts[i + 1].isdigit():
+      var_num = int(parts[i + 1])
+    elif p == '=' and i + 1 < len(parts):
+      rhs = parts[i + 1].strip()
+      if rhs.upper().startswith('VAR') and rhs[3:].isdigit():
+        value_type = 'variable'
+        value = int(rhs[3:])
+      elif rhs.upper() in ('EA', 'EB', 'EC', 'ED'):
+        value_type = 'terminal'
+        value = rhs.upper()
+      elif rhs.upper() in ('EX', 'EY'):
+        value_type = 'analog'
+        value = rhs.upper()
+      else:
+        try:
+          value = int(rhs)
+        except ValueError:
+          pass
+  return var_num, value_type, value
+
+
+def _parse_warte_params(param_str):
+  """Parse warte time string → milliseconds."""
+  try:
+    val = float(param_str.replace(',', '.').strip())
+    return int(val * 1000)
+  except ValueError:
+    return 1000
+
+
+def _create_baustein(blk):
+  """Create a GUI Baustein from a parsed block dict. Returns the Baustein or None."""
+  btype = blk['type']
+  bx, by = blk['x'], blk['y']
+  params = blk['params']
+  bs = None
+
+  if btype == 'START':
+    bs = StartBaustein(innercanvas, bx, by)
+
+  elif btype == 'ENDE':
+    bs = EndeBaustein(innercanvas, bx, by)
+
+  elif btype == 'MOTOR':
+    bs = MotorBaustein(innercanvas, bx, by)
+    motor_num = blk.get('num', 1)
+    direction = blk.get('direction', 'AUS').lower()
+    bs.motor_num = motor_num
+    bs.motor_dir = direction
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[5]['element'],
+                              text=f"M{motor_num} {direction.upper()}")
+
+  elif btype == 'LAMPE':
+    bs = LampeBaustein(innercanvas, bx, by)
+    lamp_num = blk.get('num', 1)
+    direction = blk.get('direction', 'AUS')
+    on = direction.upper() == 'EIN'
+    bs.lamp_num = lamp_num
+    bs.lamp_on = on
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[5]['element'],
+                              text=f"L{lamp_num} {'EIN' if on else 'AUS'}")
+
+  elif btype == 'EINGANG':
+    bs = EingangBaustein(innercanvas, bx, by)
+    bs.eingang = blk.get('eingang_num', _parse_eingang_num(params))
+    bs.rightOn = blk.get('right_on', 0)
+    innercanvas.itemconfigure(bs.elements[4]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[7]['element'], text=f"E {bs.eingang}")
+
+  elif btype == 'FLANKE':
+    bs = FlankeBaustein(innercanvas, bx, by)
+    bs.eingang = blk.get('eingang_num', _parse_eingang_num(params))
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[5]['element'], text=f"E {bs.eingang}")
+
+  elif btype == 'VARIABLE':
+    bs = VariableBaustein(innercanvas, bx, by)
+    var_num, value_type, value = _parse_variable_params(params)
+    bs.var = var_num
+    bs.value_type = value_type
+    bs.value = value
+    if value_type == 'konstante':
+      display_val = str(value)
+    elif value_type == 'variable':
+      display_val = f"VAR{value}"
+    elif value_type in ('terminal', 'analog'):
+      display_val = str(value)
+    else:
+      display_val = '?'
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[4]['element'],
+                              text=f"VAR {var_num} = {display_val}")
+
+  elif btype == 'VERGLEICH':
+    bs = VergleichBaustein(innercanvas, bx, by)
+    bs.var = 1
+    bs.operator = '='
+    bs.compare_type = 'konstante'
+    bs.compare_value = 0
+    _parse_vergleich_from_params(bs, params)
+    innercanvas.itemconfigure(bs.elements[4]['element'], fill='white')
+    if bs.compare_type == 'konstante':
+      dv = str(bs.compare_value)
+    elif bs.compare_type == 'variable':
+      dv = f"VAR{bs.compare_value}"
+    else:
+      dv = str(bs.compare_value)
+    innercanvas.itemconfigure(bs.elements[7]['element'],
+                              text=f"V{bs.var} {bs.operator} {dv}")
+
+  elif btype == 'INCVARIABLE':
+    bs = IncBaustein(innercanvas, bx, by)
+    bs.var = _parse_eingang_num(params)
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[4]['element'], text=f"VAR {bs.var}")
+
+  elif btype == 'DECVARIABLE':
+    bs = DecBaustein(innercanvas, bx, by)
+    bs.var = _parse_eingang_num(params)
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[4]['element'], text=f"VAR {bs.var}")
+
+  elif btype == 'WARTE':
+    bs = WarteBaustein(innercanvas, bx, by)
+    if 'wait_seconds' in blk:
+      bs.wait_ms = int(blk['wait_seconds'] * 1000)
+    else:
+      bs.wait_ms = _parse_warte_params(params)
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    secs = bs.wait_ms / 1000
+    if secs == int(secs):
+      time_str = f"{int(secs)}s"
+    else:
+      time_str = f"{secs}s"
+    innercanvas.itemconfigure(bs.elements[5]['element'], text=time_str)
+
+  elif btype == 'POSITION':
+    bs = PositionBaustein(innercanvas, bx, by)
+    bs.countervar = _parse_eingang_num(params)
+    bs.eingang = 1
+    bs.target_value = 0
+    bs.decrement = False
+    innercanvas.itemconfigure(bs.elements[4]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[5]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[6]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[11]['element'],
+                              text=f"VAR {bs.countervar}")
+
+  elif btype == 'BEEP':
+    bs = BeepBaustein(innercanvas, bx, by)
+
+  elif btype == 'NOTAUS':
+    bs = NotausBaustein(innercanvas, bx, by)
+    bs.eingang = _parse_eingang_num(params)
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[4]['element'], text=f"E {bs.eingang}")
+
+  elif btype == 'RESET':
+    bs = ResetBaustein(innercanvas, bx, by)
+    bs.eingang = _parse_eingang_num(params)
+    innercanvas.itemconfigure(bs.elements[3]['element'], fill='white')
+    innercanvas.itemconfigure(bs.elements[4]['element'], text=f"E {bs.eingang}")
+
+  elif btype == 'MELDUNG':
+    bs = MeldungBaustein(innercanvas, bx, by)
+    bs.text = params
+    innercanvas.itemconfigure(bs.elements[2]['element'], fill='#e0e0ff')
+    innercanvas.itemconfigure(bs.elements[3]['element'], text=params if params else 'Meldung')
+
+  elif btype == 'DISPLAY':
+    bs = DisplayBaustein(innercanvas, bx, by)
+    bs.text = params
+    innercanvas.itemconfigure(bs.elements[2]['element'], fill='#ffe0e0')
+    innercanvas.itemconfigure(bs.elements[3]['element'], text=params if params else 'Display')
+
+  elif btype == 'BAUSTEIN':
+    sub_name = blk.get('subprogram_name', '')
+    sub_prog = None
+    for p in programs:
+      if p.name == sub_name:
+        sub_prog = p
+        break
+    if sub_prog is None and sub_name:
+      sub_prog = SubProgram(sub_name)
+    bs = BausteinBaustein(innercanvas, sub_prog, bx, by)
+
+  return bs
+
+
+def openProject():
+  global programs
+  filepath = filedialog.askopenfilename(
+      title="MDL-Datei öffnen",
+      filetypes=[("LLWin MDL", "*.mdl *.MDL"), ("Alle Dateien", "*.*")])
+  if not filepath:
+    return
+
+  try:
+    blocks = _parse_mdl(filepath)
+  except Exception as e:
+    messagebox.showerror("Fehler", f"MDL-Datei konnte nicht gelesen werden:\n{e}")
+    traceback.print_exc()
+    return
+
+  # Clear current project
+  function_rightclick(None)
+  for prog in programs:
+    for b in prog.bausteine:
+      if b is not None:
+        b.delete()
+  innercanvas.delete("all")
+  programs.clear()
+
+  # Auto-size canvas to fit all block positions
+  global canvas_width, canvas_height
+  max_x = 1000
+  max_y = 750
+  for blk in blocks:
+    max_x = max(max_x, blk['x'] + 200)
+    max_y = max(max_y, blk['y'] + 200)
+  canvas_width = max_x
+  canvas_height = max_y
+  innercanvas.configure(width=canvas_width, height=canvas_height)
+  redraw_grid()
+
+  # Group blocks by subprogram (block_name)
+  from collections import OrderedDict
+  prog_blocks = OrderedDict()
+  for blk in blocks:
+    pname = blk.get('block_name', '$Main')
+    if pname not in prog_blocks:
+      prog_blocks[pname] = []
+    prog_blocks[pname].append(blk)
+
+  if not prog_blocks:
+    prog_blocks['$Main'] = []
+
+  # Create all SubProgram objects first so BAUSTEIN blocks can find targets
+  prog_objs = {}
+  for prog_name in prog_blocks:
+    prog = SubProgram(prog_name)
+    programs.append(prog)
+    prog_objs[prog_name] = prog
+
+  skipped = []
+  created = 0
+  conn_count = 0
+
+  for prog_name, prog_blks in prog_blocks.items():
+    switch_program(prog_objs[prog_name])
+
+    for blk in prog_blks:
+      if blk['type'] == 'TERMINAL':
+        skipped.append(blk['type'])
+        continue
+
+      bs = _create_baustein(blk)
+      if bs is None:
+        skipped.append(blk['type'])
+        continue
+
+      bausteine.append(bs)
+      blk['_baustein'] = bs
+      created += 1
+
+    # Wire connections within this subprogram
+    sp_to_blk = {}
+    for blk in prog_blks:
+      sp = blk.get('self_ptr', 0)
+      if sp != 0:
+        sp_to_blk[sp] = blk
+
+    for blk in prog_blks:
+      from_bs = blk.get('_baustein')
+      if from_bs is None:
+        continue
+      from_conns = from_bs.getConnections()
+      out_indices = [i for i, c in enumerate(from_conns) if c[2]]
+      for pin_idx, target_ptr in enumerate(blk.get('pin_targets', [])):
+        if target_ptr == 0 or pin_idx >= len(out_indices):
+          continue
+        target_blk = sp_to_blk.get(target_ptr)
+        if target_blk is None:
+          continue
+        to_bs = target_blk.get('_baustein')
+        if to_bs is None:
+          continue
+        from_conn_idx = out_indices[pin_idx]
+        to_conns = to_bs.getConnections()
+        in_indices = [i for i, c in enumerate(to_conns) if not c[2]]
+        if not in_indices:
+          continue
+        to_conn_idx = in_indices[0]
+        from_pos = from_bs.getPosition()
+        to_pos = to_bs.getPosition()
+        fc = from_conns[from_conn_idx]
+        tc = to_conns[to_conn_idx]
+        start = [from_pos[0] + fc[0], from_pos[1] + fc[1]]
+        end = [to_pos[0] + tc[0], to_pos[1] + tc[1]]
+        try:
+          path = simple_route(start, end)
+          drawPath(path)
+          connections.append([from_bs, from_conn_idx, to_bs, to_conn_idx])
+          conn_count += 1
+        except Exception:
+          pass
+
+  for blk in blocks:
+    blk.pop('_baustein', None)
+
+  # Switch to $Main (or first program)
+  main = next((p for p in programs if p.name == '$Main'), programs[0])
+  switch_program(main)
+
+  import os
+  fname = os.path.basename(filepath)
+  prog_names = [p.name for p in programs]
+  msg = f"{fname}: {created} Bausteine, {conn_count} Verbindungen geladen."
+  if len(programs) > 1:
+    msg += f"\nUnterprogramme: {', '.join(prog_names)}"
+  if skipped:
+    from collections import Counter
+    skip_counts = Counter(skipped)
+    skip_str = ', '.join(f"{n}x {t}" for t, n in skip_counts.items())
+    msg += f"\nÜbersprungen: {skip_str}"
+  messagebox.showinfo("MDL geladen", msg)
+
+
+def _parse_vergleich_from_params(bs, params):
+  """Parse Vergleich param string and set fields on bs."""
+  for op in ['>=', '<=', '>', '<', '=']:
+    if op in params:
+      parts = params.split(op, 1)
+      lhs = parts[0].strip()
+      rhs = parts[1].strip() if len(parts) > 1 else '0'
+      # LHS: "VAR  1" or "V1"
+      for p in lhs.replace('VAR', '').replace('V', '').split():
+        if p.isdigit():
+          bs.var = int(p)
+          break
+      bs.operator = op
+      # RHS
+      rhs = rhs.strip()
+      if rhs.upper().startswith('VAR') and rhs[3:].strip().isdigit():
+        bs.compare_type = 'variable'
+        bs.compare_value = int(rhs[3:].strip())
+      elif rhs.upper() in ('EA', 'EB', 'EC', 'ED'):
+        bs.compare_type = 'terminal'
+        bs.compare_value = rhs.upper()
+      else:
+        try:
+          bs.compare_value = int(rhs)
+        except ValueError:
+          pass
+      return
+
 
 def insertBaustein():
   global bs, fixed, innercanvas, root, mode
@@ -1090,7 +1932,7 @@ def insertBaustein():
   ## cancel current insertion (if any)
   function_rightclick(None)
 
-  items = ["Beep", "Decrement Variable", "Display", "Eingang", "Ende", "Flanke", "Increment Variable", "Lampe", "Meldung", "Motor", "Notaus", "Position", "Reset", "Start", "Terminal", "Variable", "Vergleich", "Warte"]
+  items = ["Beep", "Decrement Variable", "Display", "Eingang", "Ende", "Flanke", "Increment Variable", "Lampe", "Meldung", "Motor", "Notaus", "Position", "Reset", "Start", "Terminal", "Unterprogramm", "Variable", "Vergleich", "Warte"]
   dialog = ItemSelectionDialog(root, "Baustein auswählen", items)
 
   bs = None
@@ -1124,6 +1966,21 @@ def insertBaustein():
     bs = NotausBaustein(innercanvas)
   elif dialog.result == "Reset":
     bs = ResetBaustein(innercanvas)
+  elif dialog.result == "Unterprogramm":
+    sub_progs = [p for p in programs if p.name != "$Main" and p is not current_program]
+    if not sub_progs:
+      messagebox.showinfo("Unterprogramm",
+                          "Keine Unterprogramme vorhanden.\n"
+                          "Erstellen Sie zuerst eines über\nBearbeiten > Unterprogramm...")
+    else:
+      name = simpledialog.askstring("Unterprogramm einfügen",
+                                    f"Welches Unterprogramm?\n({', '.join(p.name for p in sub_progs)})")
+      if name:
+        prog = next((p for p in sub_progs if p.name == name.strip()), None)
+        if prog:
+          bs = BausteinBaustein(innercanvas, prog)
+        else:
+          messagebox.showerror("Fehler", f"Unterprogramm '{name.strip()}' nicht gefunden.")
   elif dialog.result:
     print("ERROR: not implemented yet")
   else:
@@ -1157,57 +2014,228 @@ def callback(event):
       mode = Mode.NONE
 
 
+def _inline_subprograms(main_prog):
+  """Build a flat FTI graph from the main program, inlining all BausteinBaustein calls."""
+  import FTI as fti_module
+
+  fti_map = {}      # gui block id → FTI object (main program blocks only)
+  all_fti = []      # all FTI objects for root detection
+
+  # bb_inp:  (BausteinBaustein id, inp_index 1-based) → FTI object that INP connects TO
+  # bb_outp: (BausteinBaustein id, outp_index 1-based) → (FTI object, slot) before OUTP
+  bb_inp = {}
+  bb_outp = {}
+
+  for b in main_prog.bausteine:
+    if b is None or isinstance(b, EndeBaustein):
+      continue
+    if isinstance(b, BausteinBaustein):
+      sp = b.subprogram
+      if sp is None:
+        continue
+      sp_fti = {}
+      for sb in sp.bausteine:
+        if isinstance(sb, (SubProgramEingang, SubProgramAusgang, EndeBaustein)):
+          continue
+        fti_obj = sb.to_fti()
+        if fti_obj is not None:
+          sp_fti[id(sb)] = fti_obj
+          all_fti.append(fti_obj)
+      for conn in sp.connections:
+        sf, si, st, sti = conn
+        if isinstance(sf, SubProgramEingang):
+          if not isinstance(st, (SubProgramAusgang, EndeBaustein)):
+            t = sp_fti.get(id(st))
+            if t:
+              bb_inp[(id(b), sf.index)] = t
+          continue
+        if isinstance(st, SubProgramAusgang):
+          s = sp_fti.get(id(sf))
+          if s:
+            bb_outp[(id(b), st.index)] = (s, sf.get_fti_slot(si))
+          continue
+        fti_from = sp_fti.get(id(sf))
+        if fti_from is None:
+          continue
+        if isinstance(st, EndeBaustein):
+          fti_from.set_successor(None, sf.get_fti_slot(si))
+        else:
+          fti_to = sp_fti.get(id(st))
+          if fti_to:
+            fti_from.set_successor(fti_to, sf.get_fti_slot(si))
+      continue
+    fti_obj = b.to_fti()
+    if fti_obj is not None:
+      fti_map[id(b)] = fti_obj
+      all_fti.append(fti_obj)
+
+  def _resolve_target(to_b, to_idx):
+    if isinstance(to_b, EndeBaustein):
+      return None, True
+    if isinstance(to_b, BausteinBaustein):
+      bb_conns = to_b.getConnections()
+      in_indices = [i for i, c in enumerate(bb_conns) if not c[2]]
+      try:
+        order = in_indices.index(to_idx)
+      except ValueError:
+        return None, False
+      t = bb_inp.get((id(to_b), order + 1))
+      return t, t is not None
+    t = fti_map.get(id(to_b))
+    return t, t is not None
+
+  for conn in main_prog.connections:
+    from_b, from_idx, to_b, to_idx = conn
+
+    if isinstance(from_b, BausteinBaustein):
+      bb_conns = from_b.getConnections()
+      out_indices = [i for i, c in enumerate(bb_conns) if c[2]]
+      try:
+        order = out_indices.index(from_idx)
+      except ValueError:
+        continue
+      info = bb_outp.get((id(from_b), order + 1))
+      if info is None:
+        continue
+      fti_source, slot = info
+      fti_target, ok = _resolve_target(to_b, to_idx)
+      if ok:
+        fti_source.set_successor(fti_target, slot)
+      continue
+
+    fti_from = fti_map.get(id(from_b))
+    if fti_from is None:
+      continue
+    fti_target, ok = _resolve_target(to_b, to_idx)
+    if ok:
+      fti_from.set_successor(fti_target, from_b.get_fti_slot(from_idx))
+
+  has_incoming = set()
+  for conn in main_prog.connections:
+    has_incoming.add(id(conn[2]))
+
+  prog = fti_module.Program()
+  for b in main_prog.bausteine:
+    if b is None or isinstance(b, (EndeBaustein, BausteinBaustein)):
+      continue
+    if id(b) not in has_incoming:
+      fti_obj = fti_map.get(id(b))
+      if fti_obj is not None:
+        prog.add_baustein(fti_obj)
+  return prog
+
 def runAktivModus():
-  global bausteine, connections
   port = tk.simpledialog.askstring("Aktiv-Modus", "Serieller Port:", initialvalue="/dev/ttyUSB0")
   if not port:
     return
   try:
-    import FTI as fti_module
     from FTI_com import compile_and_send_program
-
-    # Create FTI objects for all GUI Bausteine (except Ende which maps to None)
-    fti_map = {}
-    for b in bausteine:
-      if b is None or isinstance(b, EndeBaustein):
-        continue
-      fti_obj = b.to_fti()
-      if fti_obj is not None:
-        fti_map[id(b)] = fti_obj
-
-    # Link successors based on stored connections
-    for conn in connections:
-      from_b, from_conn_idx, to_b, to_conn_idx = conn
-      fti_from = fti_map.get(id(from_b))
-      if fti_from is None:
-        continue
-      if isinstance(to_b, EndeBaustein):
-        fti_to = None
-      else:
-        fti_to = fti_map.get(id(to_b))
-        if fti_to is None:
-          continue
-      slot = from_b.get_fti_slot(from_conn_idx)
-      fti_from.set_successor(fti_to, slot)
-
-    # Identify root Bausteine: those with no incoming connection in this graph
-    has_incoming = set()
-    for conn in connections:
-      has_incoming.add(id(conn[2]))
-
-    prog = fti_module.Program()
-    for b in bausteine:
-      if b is None or isinstance(b, EndeBaustein):
-        continue
-      if id(b) not in has_incoming:
-        fti_obj = fti_map.get(id(b))
-        if fti_obj is not None:
-          prog.add_baustein(fti_obj)
-
+    prog = _inline_subprograms(programs[0])
     compile_and_send_program(prog, port)
     messagebox.showinfo("Aktiv-Modus", "Programm erfolgreich übertragen!")
   except Exception as e:
     messagebox.showerror("Fehler beim Kompilieren", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
+
+
+def switch_program(prog):
+    global current_program, bausteine, connections, drawn_path_segments, path_anchor_stubs
+    function_rightclick(None)
+    if current_program is not None:
+        for b in current_program.bausteine:
+            for e in b.elements:
+                innercanvas.itemconfigure(e['element'], state='hidden')
+        for lid in current_program.connection_lines:
+            innercanvas.itemconfigure(lid, state='hidden')
+    current_program = prog
+    bausteine = prog.bausteine
+    connections = prog.connections
+    drawn_path_segments = prog.drawn_path_segments
+    path_anchor_stubs = prog.path_anchor_stubs
+    for b in prog.bausteine:
+        for e in b.elements:
+            innercanvas.itemconfigure(e['element'], state='normal')
+    for lid in prog.connection_lines:
+        innercanvas.itemconfigure(lid, state='normal')
+    root.title(f"LLWin Nachbau — {prog.name}")
+    update_window_menu()
+
+def update_window_menu():
+    last = wndwmenu.index(tk.END)
+    if last is not None and last >= 7:
+        wndwmenu.delete(7, tk.END)
+    wndwmenu.add_separator()
+    for i, prog in enumerate(programs):
+        wndwmenu.add_command(label=f"{i+1}: {prog.name}",
+                             command=lambda p=prog: switch_program(p))
+
+def createSubProgram():
+    sub_progs = [p for p in programs if p.name != "$Main"]
+    dialog = SubProgramSelectionDialog(root, sub_progs)
+    if dialog.result is None:
+        return
+    if isinstance(dialog.result, SubProgram):
+        switch_program(dialog.result)
+        return
+    name = simpledialog.askstring("Neues Unterprogramm", "Name (z.B. UP1):")
+    if not name:
+        return
+    name = name.strip()
+    if name.startswith("$"):
+        messagebox.showerror("Fehler", "Name darf nicht mit '$' beginnen.")
+        return
+    for prog in programs:
+        if prog.name == name:
+            messagebox.showerror("Fehler", f"Unterprogramm '{name}' existiert bereits.")
+            return
+    num_inputs = simpledialog.askinteger("Neues Unterprogramm", "Anzahl Eingangspfade:",
+                                         initialvalue=1, minvalue=1, maxvalue=8)
+    if num_inputs is None:
+        return
+    num_outputs = simpledialog.askinteger("Neues Unterprogramm", "Anzahl Ausgangspfade:",
+                                          initialvalue=1, minvalue=1, maxvalue=8)
+    if num_outputs is None:
+        return
+    prog = SubProgram(name, num_inputs, num_outputs)
+    programs.append(prog)
+    switch_program(prog)
+    spacing = 150
+    start_x = max(200, (canvas_width - (max(num_inputs, num_outputs) - 1) * spacing) // 2)
+    for i in range(num_inputs):
+        inp = SubProgramEingang(innercanvas, i + 1, start_x + i * spacing, 50)
+        bausteine.append(inp)
+    for i in range(num_outputs):
+        outp = SubProgramAusgang(innercanvas, i + 1, start_x + i * spacing, 650)
+        bausteine.append(outp)
+
+def deleteSubProgram():
+    sub_names = [p.name for p in programs if p.name != "$Main"]
+    if not sub_names:
+        messagebox.showinfo("Löschen", "Keine Unterprogramme vorhanden.")
+        return
+    name = simpledialog.askstring("Unterprogramm löschen",
+                                  f"Name des zu löschenden Unterprogramms\n({', '.join(sub_names)}):")
+    if not name:
+        return
+    name = name.strip()
+    prog = None
+    for p in programs:
+        if p.name == name:
+            prog = p
+            break
+    if prog is None or prog.name == "$Main":
+        messagebox.showerror("Fehler", f"Unterprogramm '{name}' nicht gefunden.")
+        return
+    if not messagebox.askyesno("Löschen", f"Unterprogramm '{name}' wirklich löschen?"):
+        return
+    if current_program is prog:
+        switch_program(programs[0])
+    for b in prog.bausteine:
+        if b is not None:
+            b.delete()
+    for lid in prog.connection_lines:
+        innercanvas.delete(lid)
+    programs.remove(prog)
+    update_window_menu()
 
 
 root = tk.Tk()
@@ -1218,7 +2246,7 @@ root.config(menu=menu)
 filemenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Datei", menu=filemenu)
 filemenu.add_command(label="Neu...", command=newProject)
-filemenu.add_command(label="Öffnen...")
+filemenu.add_command(label="Öffnen...", command=openProject)
 filemenu.add_command(label="Speichern")
 filemenu.add_command(label="Speichern unter...")
 filemenu.add_command(label="Schließen")
@@ -1231,8 +2259,8 @@ filemenu.add_separator()
 filemenu.add_command(label="Beenden", command=root.quit)
 editmenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Bearbeiten", menu=editmenu)
-editmenu.add_command(label="Hauptprogramm")
-editmenu.add_command(label="Unterprogramm...")
+editmenu.add_command(label="Hauptprogramm", command=lambda: switch_program(programs[0]))
+editmenu.add_command(label="Unterprogramm...", command=createSubProgram)
 editmenu.add_separator()
 editmenu.add_command(label="Rückgängig")
 editmenu.add_separator()
@@ -1243,7 +2271,7 @@ subprogmenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Unterprogramm", menu=subprogmenu)
 subprogmenu.add_command(label="Kopieren...")
 subprogmenu.add_command(label="Aussehen...")
-subprogmenu.add_command(label="Löschen...")
+subprogmenu.add_command(label="Löschen...", command=deleteSubProgram)
 subprogmenu.add_command(label="Attribute...")
 runmenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Run", menu=runmenu)
@@ -1272,7 +2300,6 @@ wndwmenu.add_command(label="Symbole anordnen")
 wndwmenu.add_command(label="Schließen")
 wndwmenu.add_command(label="Alle schließen")
 wndwmenu.add_separator()
-wndwmenu.add_command(label="1: $Main")
 wndwmenu.add_command(label="Kopieren zur Ablagemappe")
 helpmenu = tk.Menu(menu, tearoff=0)
 menu.add_cascade(label="Fenster", menu=helpmenu)
@@ -1335,14 +2362,11 @@ canvas_width, canvas_height = 1000, 750  # Size larger than the window
 innercanvas = tk.Canvas(frame, bg="white", width=canvas_width, height=canvas_height)
 innercanvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-for x in range(0, canvas_width, 50):  # Vertical dashed lines every 50 pixels
-        innercanvas.create_line(x, 0, x, canvas_height, dash=(4, 2), fill="gray")
+redraw_grid()
 
-for y in range(0, canvas_height, 50):  # Horizontal dashed lines every 50 pixels
-        innercanvas.create_line(0, y, canvas_width, y, dash=(4, 2), fill="gray")
-
-
-
+main_prog = SubProgram("$Main")
+programs.append(main_prog)
+switch_program(main_prog)
 
 innercanvas.bind("<Motion>", callback_motion)
 innercanvas.bind("<Button-1>", callback)
@@ -1352,8 +2376,10 @@ innercanvas.bind("<Button-3>", function_rightclick)
 root.mainloop()
 
 print("the following Bausteine have been created:")
-for b in bausteine:
-  if b is not None:
-    print(b.toString())
+for prog in programs:
+  print(f"  [{prog.name}]")
+  for b in prog.bausteine:
+    if b is not None:
+      print(f"    {b.toString()}")
 
 exit(0)
