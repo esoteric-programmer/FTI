@@ -1,7 +1,7 @@
 # fischertechnik LLWin 2.1 — MDL File Format Specification
 
-**Version:** 1.5  
-**Date:** 2026-10-10  
+**Version:** 1.6  
+**Date:** 2026-10-19  
 **Based on:** Reverse engineering of LLWIN.EXE embedded 32-bit code  
 **Extensions:** `.MDL` (models), `.MDN` (default/template models)  
 
@@ -255,7 +255,8 @@ so swapping it with fixed-size sections shifts all subsequent offsets.
    |--------|------|--------|-----------|-----------------------------------|
    | 0x00   | 4    | uint32 | field_00  | Stale pointer / properties        |
    | 0x04   | 4    | uint32 | field_04  | Properties / coordinates          |
-   | 0x08   | 4    | uint32 | field_08  | Properties                        |
+   | 0x08   | 2    | uint16 | num_conns | Number of connections from this pin |
+   | 0x0A   | 2    | uint16 | field_0A  | Properties                        |
    | 0x0C   | 4    | uint32 | conn_head | Head of connection record list    |
    | 0x10   | 4    | uint32 | field_10  | Properties                        |
 
@@ -278,7 +279,8 @@ so swapping it with fixed-size sections shifts all subsequent offsets.
    
    The format depends on the element's class and type — see §1.5 for details.
 
-4. **Connection Records** (for each output pin with `conn_head != 0`):
+4. **Connection Records — Routing Waypoints** (for each output pin with
+   `conn_head != 0`):
    
    **IMPORTANT:** Connection records are serialized AFTER the input connections
    and element data, not immediately after the output pins. The serialization
@@ -291,9 +293,30 @@ so swapping it with fixed-size sections shifts all subsequent offsets.
    | Offset | Size | Type   | Field    | Description                      |
    |--------|------|--------|----------|----------------------------------|
    | 0x00   | 4    | uint32 | next_ptr | Next connection record; 0 = end  |
-   | 0x04   | 4    | uint32 | target   | Stale pointer to target element  |
+   | 0x04   | 2    | uint16 | wp_x     | Waypoint X in canvas pixel coords |
+   | 0x06   | 2    | uint16 | wp_y     | Waypoint Y in canvas pixel coords |
 
    The list is null-terminated: when `next_ptr == 0`, this is the last record.
+   
+   **Chain order:** The first record holds the waypoint nearest the
+   **target/destination** element's input, and the last record holds the
+   waypoint nearest the **source** element's output. Intermediate records
+   form the zigzag routing path that avoids block collisions.
+   
+   **Coordinate mapping (canvas pixel coords ↔ element grid coords):**
+   Blocks are drawn at canvas position `(elem_x + 60, elem_y)`. Connection
+   attachment points depend on block type:
+   
+   | Block type | Output point offset | Input point offset |
+   |------------|--------------------|--------------------|
+   | Standard (width=20) | (+70, +20) | (+70, +0) |
+   | EINGANG (width=50), out[0] | (+70, +50) | (+70, +0) |
+   | EINGANG (width=50), out[1] | (+140, +25) | — |
+   | POSITION (width=45) | (+70, +45) | (+70, +0) |
+   
+   General formula: `output_x = elem_x + 60 + block_width/2` (centered),
+   `input_x` follows the same rule. The Y offsets depend on block height
+   in element coordinate space (20 for standard blocks, larger for others).
 
 ### 1.5 Element Data Array Content
 
