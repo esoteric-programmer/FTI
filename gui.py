@@ -1361,19 +1361,25 @@ def _parse_mdl(filepath):
             if dap != 0 and nda > 0:
               da_data = data[pos:pos + nda * 8]
               pos += nda * 8
+            pin_waypoints = []
             for cp in conn_pins:
+              wps = []
               if cp != 0:
                 while pos + 8 <= len(data):
                   cn = _u32(pos)
+                  wp_x = _u16(pos + 4)
+                  wp_y = _u16(pos + 6)
+                  wps.append((wp_x, wp_y))
                   pos += 8
                   if cn == 0:
                     break
+              pin_waypoints.append(wps)
 
             elems.append({'type': '', 'x': x, 'y': y, 'type_size': ts,
                           'nop': nop, 'nic': nic, 'nda': nda,
                           'btp': btp, 'self_ptr': self_ptr,
                           'pin_targets': pin_targets, 'class_id': class_id,
-                          'da_data': da_data})
+                          'da_data': da_data, 'pin_waypoints': pin_waypoints})
             if enp == 0:
               break
 
@@ -1456,6 +1462,7 @@ def _parse_mdl(filepath):
         blk = {'type': 'BAUSTEIN', 'x': e['x'], 'y': e['y'], 'params': '',
                'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
                'pin_targets': e.get('pin_targets', []),
+               'pin_waypoints': e.get('pin_waypoints', []),
                'subprogram_name': target_name}
         blocks.append(blk)
         continue
@@ -1469,6 +1476,7 @@ def _parse_mdl(filepath):
         blk = {'type': 'SUBPROGRAM_EINGANG', 'x': e['x'], 'y': e['y'], 'params': '',
                'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
                'pin_targets': e.get('pin_targets', []),
+               'pin_waypoints': e.get('pin_waypoints', []),
                'entry_index': idx, 'entry_label': label}
         blocks.append(blk)
         continue
@@ -1482,6 +1490,7 @@ def _parse_mdl(filepath):
         blk = {'type': 'SUBPROGRAM_AUSGANG', 'x': e['x'], 'y': e['y'], 'params': '',
                'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
                'pin_targets': e.get('pin_targets', []),
+               'pin_waypoints': e.get('pin_waypoints', []),
                'exit_index': idx, 'exit_label': label}
         blocks.append(blk)
         continue
@@ -1504,7 +1513,8 @@ def _parse_mdl(filepath):
       da = e.get('da_data', b'')
       blk = {'type': tname, 'x': e['x'], 'y': e['y'], 'params': '',
              'block_name': blk_name, 'self_ptr': e.get('self_ptr', 0),
-             'pin_targets': e.get('pin_targets', [])}
+             'pin_targets': e.get('pin_targets', []),
+             'pin_waypoints': e.get('pin_waypoints', [])}
 
       if tname == 'MOTOR' or tname == 'LAMPE':
         if len(sub) > 4:
@@ -1952,7 +1962,19 @@ def openProject():
         start = [from_pos[0] + fc[0], from_pos[1] + fc[1]]
         end = [to_pos[0] + tc[0], to_pos[1] + tc[1]]
         try:
-          path = simple_route(start, end)
+          wps = blk.get('pin_waypoints', [])
+          wp_chain = wps[pin_idx] if pin_idx < len(wps) else []
+          if len(wp_chain) >= 2:
+            llwin_src = wp_chain[-1]
+            dx = start[0] - llwin_src[0]
+            dy = start[1] - llwin_src[1]
+            path = [start]
+            for wi in range(len(wp_chain) - 2, 0, -1):
+              wx, wy = wp_chain[wi]
+              path.append([wx + dx, wy + dy])
+            path.append(end)
+          else:
+            path = simple_route(start, end)
           drawPath(path)
           connections.append([from_bs, from_conn_idx, to_bs, to_conn_idx])
           conn_count += 1
