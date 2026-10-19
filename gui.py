@@ -1864,8 +1864,21 @@ def openProject():
   innercanvas.delete("all")
   programs.clear()
 
-  # Auto-size canvas to fit all block positions
+  # Blocks extend up to ~80px left / ~40px above their (x,y) position.
+  # Tk Canvas clips at (0,0), so shift all positions to keep every bounding
+  # box visible. The waypoint coordinate transform uses block positions, so
+  # it inherits the shift automatically.
   global canvas_width, canvas_height
+  BB_LEFT = 80
+  BB_TOP = 40
+  min_x = min((blk['x'] for blk in blocks), default=BB_LEFT) - BB_LEFT
+  min_y = min((blk['y'] for blk in blocks), default=BB_TOP) - BB_TOP
+  pad_x = max(0, -min_x)
+  pad_y = max(0, -min_y)
+  if pad_x or pad_y:
+    for blk in blocks:
+      blk['x'] += pad_x
+      blk['y'] += pad_y
   max_x = 1000
   max_y = 750
   for blk in blocks:
